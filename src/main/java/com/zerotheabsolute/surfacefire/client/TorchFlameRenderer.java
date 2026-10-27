@@ -24,9 +24,9 @@ public final class TorchFlameRenderer {
     private static final float FLAME_BASE_HEIGHT = 8.0f / 16.0f;
     private static final float FLAME_HEIGHT = 0.74f;
     private static final float FLAME_WIDTH = 0.42f;
-    private static final int BEND_SEGMENTS = 6;
-    private static final float MAX_TIP_BEND = .45f;
-    private static final float MOVING_HEIGHT_REDUCTION = .22f;
+    private static final int BEND_SEGMENTS = TorchPlume.SEGMENTS;
+    private static final float MAX_TIP_BEND = .64f;
+    private static final TorchPlume PLUME = new TorchPlume();
     private static final int MAX_VISIBLE_TORCHES = 4096;
     private static final double RENDER_DISTANCE_SQUARED = 64 * 64;
     private static final double[] WIND = new double[3];
@@ -125,60 +125,62 @@ public final class TorchFlameRenderer {
         float dx = turn ? 0 : width * .5f, dz = turn ? width * .5f : 0;
         if (cameraFacing) dx = dz = 0;
         float scale = (float) Math.sqrt(m.m10() * m.m10() + m.m11() * m.m11() + m.m12() * m.m12());
-        float bend = height * scale * MAX_TIP_BEND;
+        PLUME.update(WorldAirflow.seconds(), seed, airflow.strength());
+        float response = TorchPlume.response(airflow.strength());
+        float gain = airflow.strength() > .0001f ? response / airflow.strength() : 0;
+        float bend = height * scale * MAX_TIP_BEND * gain;
         float cameraWidth = cameraFacing ? width * scale * .5f : 0;
-        float raisedHeight = height * (1 - MOVING_HEIGHT_REDUCTION * airflow.strength());
-        int segments = airflow.strength() > .001f ? BEND_SEGMENTS : 1;
+        int segments = BEND_SEGMENTS;
         for (int i = 0; i < segments; i++) {
             float bottom = (float) i / segments, top = (float) (i + 1) / segments;
             vertex(
                     v,
                     m,
-                    x - dx,
-                    y + raisedHeight * bottom,
-                    z - dz,
+                    x - dx * PLUME.width[i],
+                    y + height * PLUME.rise[i],
+                    z - dz * PLUME.width[i],
                     0,
                     bottom,
                     seed,
                     airflow,
                     bend,
-                    cameraWidth);
+                    cameraWidth * PLUME.width[i], i, height * scale);
             vertex(
                     v,
                     m,
-                    x + dx,
-                    y + raisedHeight * bottom,
-                    z + dz,
+                    x + dx * PLUME.width[i],
+                    y + height * PLUME.rise[i],
+                    z + dz * PLUME.width[i],
                     1,
                     bottom,
                     seed,
                     airflow,
                     bend,
-                    cameraWidth);
+                    cameraWidth * PLUME.width[i], i, height * scale);
             vertex(
                     v,
                     m,
-                    x + dx,
-                    y + raisedHeight * top,
-                    z + dz,
+                    x + dx * PLUME.width[i + 1],
+                    y + height * PLUME.rise[i + 1],
+                    z + dz * PLUME.width[i + 1],
                     1,
                     top,
                     seed,
                     airflow,
                     bend,
-                    cameraWidth);
+                    cameraWidth * PLUME.width[i + 1], i + 1, height * scale);
             vertex(
                     v,
                     m,
-                    x - dx,
-                    y + raisedHeight * top,
-                    z - dz,
+                    x - dx * PLUME.width[i + 1],
+                    y + height * PLUME.rise[i + 1],
+                    z - dz * PLUME.width[i + 1],
                     0,
                     top,
                     seed,
                     airflow,
                     bend,
-                    cameraWidth);
+                    cameraWidth * PLUME.width[i + 1], i + 1, height * scale);
         }
     }
 
@@ -193,15 +195,16 @@ public final class TorchFlameRenderer {
             float seed,
             TorchAirflow.Bend airflow,
             float bend,
-            float cameraWidth) {
-        float displacement = airflow.curvature(w) * bend;
+            float cameraWidth, int row, float height) {
+        float displacement = PLUME.bend[row] * bend;
         float vx =
                 m.m00() * x
                         + m.m10() * y
                         + m.m20() * z
                         + m.m30()
                         + airflow.x() * displacement
-                        + (2 * u - 1) * cameraWidth;
+                        + (2 * u - 1) * cameraWidth
+                        + PLUME.curl[row] * height;
         float vy = m.m01() * x + m.m11() * y + m.m21() * z + m.m31() + airflow.y() * displacement;
         float vz = m.m02() * x + m.m12() * y + m.m22() * z + m.m32() + airflow.z() * displacement;
         if (ShaderPackRendering.active()) {
@@ -255,46 +258,44 @@ public final class TorchFlameRenderer {
         double seconds = WorldAirflow.seconds();
         WorldAirflow.sample(seconds, x, y, z, WIND);
         double riseSpeed = Math.sqrt(GRAVITY * height);
-        double bx = Math.tanh(WIND[0] / riseSpeed) * height * WORLD_TIP_BEND;
-        double bz = Math.tanh(WIND[2] / riseSpeed) * height * WORLD_TIP_BEND;
-        double flutter = Math.sin(seconds * 23 + seed * 31) * height * .035;
-        bx += right.x * flutter;
-        bz += right.z * flutter;
+        double bx = Math.tanh(WIND[0] * 1.6 / riseSpeed) * height * WORLD_TIP_BEND;
+        double bz = Math.tanh(WIND[2] * 1.6 / riseSpeed) * height * WORLD_TIP_BEND;
+        PLUME.update(seconds, seed, (float) Math.min(1, Math.hypot(WIND[0], WIND[2]) / riseSpeed));
         for (int i = 0; i < BEND_SEGMENTS; i++) {
             float bottom = (float) i / BEND_SEGMENTS, top = (float) (i + 1) / BEND_SEGMENTS;
             worldVertex(
                     vertices,
                     camera,
-                    x - dx + bx * bottom * bottom,
-                    y + height * bottom,
-                    z - dz + bz * bottom * bottom,
+                    x - dx * PLUME.width[i] + bx * PLUME.bend[i] + right.x * height * PLUME.curl[i],
+                    y + height * PLUME.rise[i],
+                    z - dz * PLUME.width[i] + bz * PLUME.bend[i] + right.z * height * PLUME.curl[i],
                     0,
                     bottom,
                     seed);
             worldVertex(
                     vertices,
                     camera,
-                    x + dx + bx * bottom * bottom,
-                    y + height * bottom,
-                    z + dz + bz * bottom * bottom,
+                    x + dx * PLUME.width[i] + bx * PLUME.bend[i] + right.x * height * PLUME.curl[i],
+                    y + height * PLUME.rise[i],
+                    z + dz * PLUME.width[i] + bz * PLUME.bend[i] + right.z * height * PLUME.curl[i],
                     1,
                     bottom,
                     seed);
             worldVertex(
                     vertices,
                     camera,
-                    x + dx + bx * top * top,
-                    y + height * top,
-                    z + dz + bz * top * top,
+                    x + dx * PLUME.width[i + 1] + bx * PLUME.bend[i + 1] + right.x * height * PLUME.curl[i + 1],
+                    y + height * PLUME.rise[i + 1],
+                    z + dz * PLUME.width[i + 1] + bz * PLUME.bend[i + 1] + right.z * height * PLUME.curl[i + 1],
                     1,
                     top,
                     seed);
             worldVertex(
                     vertices,
                     camera,
-                    x - dx + bx * top * top,
-                    y + height * top,
-                    z - dz + bz * top * top,
+                    x - dx * PLUME.width[i + 1] + bx * PLUME.bend[i + 1] + right.x * height * PLUME.curl[i + 1],
+                    y + height * PLUME.rise[i + 1],
+                    z - dz * PLUME.width[i + 1] + bz * PLUME.bend[i + 1] + right.z * height * PLUME.curl[i + 1],
                     0,
                     top,
                     seed);
