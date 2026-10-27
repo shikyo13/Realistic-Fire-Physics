@@ -1,0 +1,6 @@
+{
+  "torch_burn": {
+    "subtitle": "subtitles.surfacefire.torch_burn",
+    "sounds": [{"name": "minecraft:block.fire.ambient", "type": "event"}]
+  }
+}

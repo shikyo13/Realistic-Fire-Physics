@@ -1,0 +1,436 @@
+package com.zerotheabsolute.surfacefire.client;
+
+import com.mojang.blaze3d.vertex.VertexConsumer;
+import com.zerotheabsolute.surfacefire.FireLighting;
+import com.zerotheabsolute.surfacefire.FireSettings;
+import com.zerotheabsolute.surfacefire.structure.BurningBlock;
+import com.zerotheabsolute.surfacefire.structure.StructureFuel;
+import com.zerotheabsolute.surfacefire.structure.StructurePacket;
+import com.zerotheabsolute.surfacefire.structure.SurfaceCell;
+
+import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
+
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.renderer.LevelRenderer;
+import net.minecraft.client.renderer.LightTexture;
+import net.minecraft.client.renderer.MultiBufferSource;
+import net.minecraft.client.renderer.RenderType;
+import net.minecraft.client.renderer.texture.OverlayTexture;
+import net.minecraft.core.Direction;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.Vec3;
+import net.neoforged.neoforge.client.event.RenderLevelStageEvent;
+
+import java.util.ArrayList;
+import java.util.List;
+
+/** Fine char fronts are face meshes; only active surfaces emit flames and smoke. */
+final class StructureFireClient {
+    private static final int GRID = SurfaceCell.WIDTH, CORNER_WIDTH = GRID + 1;
+    private static final double SURFACE_OFFSET = .012;
+    private static final Vec3 UP = new Vec3(0, 1, 0);
+    private static final Direction[] FACES = Direction.values();
+    private static final ShaderPackRendering.GroundLayer[] LAYERS = {
+        ShaderPackRendering.GroundLayer.HEAT, ShaderPackRendering.GroundLayer.EMBER
+    };
+    private static final Long2ObjectOpenHashMap<Mesh> MESHES = new Long2ObjectOpenHashMap<>();
+    private static final List<Mesh> VISIBLE = new ArrayList<>();
+    private static String dimension = "";
+    private static long frame;
+    private static boolean lightingPending;
+
+    private StructureFireClient() {}
+
+    static boolean hasFire() {
+        return !MESHES.isEmpty();
+    }
+
+    static void clear() {
+        MESHES.clear();
+        VISIBLE.clear();
+        dimension = "";
+        lightingPending = false;
+        StructureBurnMasks.clear();
+    }
+
+    static void receive(StructurePacket packet) {
+        var level = Minecraft.getInstance().level;
+        // The login snapshot can precede client terrain and the first level tick.
+        var lighting =
+                level != null && packet.dimension().equals(level.dimension().location().toString())
+                        ? FireLighting.get(level)
+                        : null;
+        if (packet.reset() || !dimension.equals(packet.dimension())) {
+            clear();
+            if (lighting != null) lighting.clearStructures();
+        }
+        dimension = packet.dimension();
+        for (var change : packet.changes()) {
+            long key = change.pos().asLong();
+            if (change.cell() == StructurePacket.REMOVE) {
+                MESHES.remove(key);
+                StructureBurnMasks.remove(change.pos());
+                if (lighting != null) lighting.removeStructure(key);
+                continue;
+            }
+            var mesh =
+                    MESHES.computeIfAbsent(
+                            key,
+                            unused ->
+                                    new Mesh(
+                                            new BurningBlock(
+                                                    change.pos(),
+                                                    Block.stateById(change.state()),
+                                                    change.fuel())));
+            mesh.block.quenched = change.quenched();
+            if (change.cell() >= 0) {
+                mesh.block.ignite(change.cell(), change.ignition());
+                int face = change.cell() / SurfaceCell.FACE_CELLS;
+                if (mesh.faces[face] == null) mesh.faces[face] = new Face(mesh.block, FACES[face]);
+            }
+            if (lighting != null) lighting.acceptStructure(mesh.block);
+            StructureBurnMasks.changed(mesh.block);
+        }
+        lightingPending |= lighting == null;
+    }
+
+    static void restoreLighting() {
+        var level = Minecraft.getInstance().level;
+        if (!lightingPending
+                || level == null
+                || !dimension.equals(level.dimension().location().toString())) return;
+        for (var mesh : MESHES.values()) FireLighting.get(level).acceptStructure(mesh.block);
+        lightingPending = false;
+    }
+
+    static String status() {
+        return "surfaces=" + MESHES.size() + ", " + StructureBurnMasks.status();
+    }
+
+    private static final class Mesh {
+        final BurningBlock block;
+        final Face[] faces = new Face[6];
+        final AABB bounds;
+        int light;
+        final FlameMotion motion = new FlameMotion();
+
+        Mesh(BurningBlock block) {
+            this.block = block;
+            bounds = new AABB(block.pos).inflate(2);
+        }
+    }
+
+    private static final class Face {
+        final BurningBlock block;
+        final Direction direction;
+        final Vec3 normal;
+        final Corner[] corners = new Corner[CORNER_WIDTH * CORNER_WIDTH];
+        boolean visible;
+        final Vec3[] anchors = new Vec3[SurfaceCell.FACE_CELLS];
+        final float[] seeds = new float[SurfaceCell.FACE_CELLS];
+
+        Face(BurningBlock block, Direction direction) {
+            this.block = block;
+            this.direction = direction;
+            normal = Vec3.atLowerCornerOf(direction.getNormal());
+            for (int index = 0; index < anchors.length; index++) {
+                int global = direction.get3DDataValue() * SurfaceCell.FACE_CELLS + index;
+                float seed = noise(block.pos.asLong() + global * 73428767L);
+                seeds[index] = seed;
+                double u = (index % GRID + .5) / GRID + .19 * (seed - .5);
+                double v =
+                        (index / GRID + .5) / GRID
+                                + .19 * (noise(global * 912931L + block.pos.asLong()) - .5);
+                anchors[index] =
+                        new SurfaceCell(block.pos, direction, 0, 0)
+                                .point(Math.clamp(u, .02, .98), Math.clamp(v, .02, .98))
+                                .add(normal.scale(.065 + seed * .045));
+            }
+
+            for (int v = 0; v < CORNER_WIDTH; v++)
+                for (int u = 0; u < CORNER_WIDTH; u++)
+                    corners[v * CORNER_WIDTH + u] = new Corner(this, u, v);
+        }
+
+        Corner corner(int u, int v) {
+            return corners[v * CORNER_WIDTH + u];
+        }
+    }
+
+    private static final class Corner {
+        final Face face;
+        final Vec3 point;
+        final int[] cells;
+        final float textureU, textureV;
+        long updated = -1;
+        float cover, heat, ember;
+
+        Corner(Face face, int u, int v) {
+            this.face = face;
+            point =
+                    new SurfaceCell(face.block.pos, face.direction, 0, 0)
+                            .point(u / (double) GRID, v / (double) GRID)
+                            .add(face.normal.scale(SURFACE_OFFSET));
+            // Clamp at the block edge so adjacent faces join without an uncharred seam.
+            cells = new int[4];
+            int at = 0;
+            for (int dv = -1; dv <= 0; dv++)
+                for (int du = -1; du <= 0; du++)
+                    cells[at++] =
+                            face.direction.get3DDataValue() * SurfaceCell.FACE_CELLS
+                                    + Math.clamp(v + dv, 0, GRID - 1) * GRID
+                                    + Math.clamp(u + du, 0, GRID - 1);
+            double texU = face.direction.getAxis() == Direction.Axis.X ? point.z : point.x;
+            double texV = face.direction.getAxis() == Direction.Axis.Y ? point.z : point.y;
+            textureU = (float) texU / ShaderPackRendering.TERRAIN_TEXTURE_BLOCKS;
+            textureV = (float) texV / ShaderPackRendering.TERRAIN_TEXTURE_BLOCKS;
+        }
+
+        void update(double now) {
+            if (updated == frame) return;
+            updated = frame;
+            cover = heat = ember = 0;
+            for (int cell : cells) {
+                long ignition = face.block.ignition[cell];
+                if (ignition == BurningBlock.UNBURNED) continue;
+                double age = now - ignition;
+                cover += clamp(age / 10) * .25f;
+                if (face.block.quenched) continue;
+                heat += intensity(face.block, cell, now) * .25f;
+                ember +=
+                        clamp(
+                                        (face.block.fuel.flameTicks
+                                                        + FireSettings.SMOLDER_TICKS
+                                                        - age)
+                                                / FireSettings.SMOLDER_TICKS)
+                                * .25f;
+            }
+        }
+
+        float alpha(ShaderPackRendering.GroundLayer layer, double now) {
+            update(now);
+            return ShaderPackRendering.groundAlpha(
+                    layer, cover, heat, ember, 0, now / 20, point.x + point.y * .73, point.z);
+        }
+    }
+
+    static void render(
+            RenderLevelStageEvent event,
+            MultiBufferSource.BufferSource buffer,
+            double now,
+            boolean reflection,
+            boolean glow,
+            boolean textured) {
+        var mc = Minecraft.getInstance();
+        if (mc.level == null
+                || mc.player == null
+                || !dimension.equals(mc.level.dimension().location().toString())) return;
+        var camera = event.getCamera().getPosition();
+        if (!glow) {
+            frame++;
+            VISIBLE.clear();
+            for (var mesh : MESHES.values()) {
+                if (mesh.block.quenched || now >= mesh.block.coolAt()) continue;
+                if (mesh.block.pos.distToCenterSqr(camera) > FireViewDistance.squared(mc)
+                        || !event.getFrustum().isVisible(mesh.bounds)
+                        || !mc.level
+                                .getChunkSource()
+                                .hasChunk(mesh.block.pos.getX() >> 4, mesh.block.pos.getZ() >> 4)
+                        || !mesh.block.matches(mc.level.getBlockState(mesh.block.pos))) continue;
+                mesh.light = LevelRenderer.getLightColor(mc.level, mesh.block.pos.above());
+                mesh.motion.update(
+                        now / 20,
+                        mesh.block.pos.getX(),
+                        mesh.block.pos.getY(),
+                        mesh.block.pos.getZ());
+                for (var face : mesh.faces)
+                    if (face != null) {
+                        var neighbor = mesh.block.pos.relative(face.direction);
+                        face.visible =
+                                !mc.level.getBlockState(neighbor).isSolidRender(mc.level, neighbor)
+                                        && camera.subtract(Vec3.atCenterOf(mesh.block.pos))
+                                                        .dot(face.normal)
+                                                > -.1;
+                    }
+                VISIBLE.add(mesh);
+            }
+            for (var layer : LAYERS) {
+                var vertices = buffer.getBuffer(layer.type);
+                for (var mesh : VISIBLE)
+                    for (var face : mesh.faces) {
+                        if (face == null
+                                || !face.visible
+                                || mesh.block.fuel == StructureFuel.LEAVES) continue;
+                        if (mesh.block.quenched || now >= mesh.block.coolAt()) continue;
+                        for (int v = 0; v < GRID; v++)
+                            for (int u = 0; u < GRID; u++) {
+                                var a = face.corner(u, v);
+                                var b = face.corner(u, v + 1);
+                                var c = face.corner(u + 1, v + 1);
+                                var d = face.corner(u + 1, v);
+                                float alpha =
+                                        a.alpha(layer, now)
+                                                + b.alpha(layer, now)
+                                                + c.alpha(layer, now)
+                                                + d.alpha(layer, now);
+                                if (alpha > .005f)
+                                    quad(vertices, face, u, v, 1, layer, now, camera, mesh.light);
+                            }
+                    }
+                buffer.endBatch(layer.type);
+            }
+        }
+        RenderType flameType =
+                reflection
+                        ? ShaderPackRendering.SURFACE_FLAME_CORE
+                        : textured
+                                ? ShaderPackRendering.SURFACE_FLAME
+                                : FireRenderTypes.SURFACE_FLAME;
+        var vertices = buffer.getBuffer(flameType);
+        Vec3 right = new Vec3(event.getCamera().getLeftVector()).scale(-1);
+        Vec3 flatRight = new Vec3(right.x, 0, right.z).normalize();
+        for (var mesh : VISIBLE) {
+            if (mesh.block.quenched || now >= mesh.block.lastIgnition + mesh.block.fuel.flameTicks)
+                continue;
+            for (var face : mesh.faces) {
+                if (face == null || !face.visible) continue;
+                // One continuous plume for each 2x2 burn-cell group; char still resolves every
+                // cell.
+                for (int v = 0; v < GRID; v += 2)
+                    for (int u = 0; u < GRID; u += 2) {
+                        float strength = 0;
+                        int chosen = -1;
+                        for (int dv = 0; dv < 2; dv++)
+                            for (int du = 0; du < 2; du++) {
+                                int index =
+                                        face.direction.get3DDataValue() * SurfaceCell.FACE_CELLS
+                                                + (v + dv) * GRID
+                                                + u
+                                                + du;
+                                float heat = intensity(mesh.block, index, now);
+                                if (heat > strength) {
+                                    strength = heat;
+                                    chosen = index;
+                                }
+                            }
+                        if (strength < .01f) continue;
+                        int local = chosen % SurfaceCell.FACE_CELLS;
+                        float seed = face.seeds[local];
+                        var point = face.anchors[local];
+                        double height =
+                                (mesh.block.fuel == StructureFuel.LEAVES ? .50 : .44)
+                                        * mesh.motion.height(seed, strength);
+                        FlameGeometry.billboard(
+                                vertices,
+                                camera,
+                                textured,
+                                point.x,
+                                point.y - .035,
+                                point.z,
+                                .22 + seed * .16,
+                                height,
+                                flatRight,
+                                mesh.motion.up(),
+                                seed,
+                                strength * mesh.motion.brightness(seed),
+                                false,
+                                LightTexture.FULL_BRIGHT);
+                    }
+            }
+        }
+        buffer.endBatch(flameType);
+        if (reflection) return;
+        RenderType smokeType = textured ? ShaderPackRendering.SMOKE : FireRenderTypes.SMOKE;
+        var smoke = buffer.getBuffer(smokeType);
+        if (!textured)
+            VISIBLE.sort(
+                    (a, b) ->
+                            Double.compare(
+                                    b.block.pos.distToCenterSqr(camera),
+                                    a.block.pos.distToCenterSqr(camera)));
+        Vec3 up = new Vec3(event.getCamera().getUpVector());
+        for (var mesh : VISIBLE) {
+            if (mesh.block.quenched || now >= mesh.block.coolAt()) continue;
+            double age = (now - mesh.block.firstIgnition) / 20;
+            float seed = noise(mesh.block.pos.asLong());
+            for (int i = 0; i < 3; i++) {
+                double cycle = (age * .16 + i / 3.0 + seed) % 1;
+                float alpha =
+                        clamp(age / 2)
+                                * clamp((mesh.block.coolAt() - now) / 240)
+                                * clamp(cycle * 5)
+                                * clamp((1 - cycle) * 3)
+                                * .22f;
+                double size = .4 + cycle * 1.2;
+                FlameGeometry.billboard(
+                        smoke,
+                        camera,
+                        textured,
+                        mesh.block.pos.getX() + .5 + cycle * .4,
+                        mesh.block.pos.getY() + 1 + cycle * 2.7,
+                        mesh.block.pos.getZ() + .5,
+                        size,
+                        size,
+                        right,
+                        up,
+                        seed,
+                        alpha,
+                        true,
+                        mesh.light);
+            }
+        }
+        buffer.endBatch(smokeType);
+    }
+
+    private static void quad(
+            VertexConsumer vertices,
+            Face face,
+            int u,
+            int v,
+            int size,
+            ShaderPackRendering.GroundLayer layer,
+            double now,
+            Vec3 camera,
+            int light) {
+        corner(vertices, face.corner(u, v), layer, now, camera, light);
+        corner(vertices, face.corner(u, v + size), layer, now, camera, light);
+        corner(vertices, face.corner(u + size, v + size), layer, now, camera, light);
+        corner(vertices, face.corner(u + size, v), layer, now, camera, light);
+    }
+
+    private static void corner(
+            VertexConsumer vertices,
+            Corner corner,
+            ShaderPackRendering.GroundLayer layer,
+            double now,
+            Vec3 camera,
+            int light) {
+        var p = corner.point;
+        var n = corner.face.normal;
+        vertices.addVertex(
+                        (float) (p.x - camera.x),
+                        (float) (p.y - camera.y),
+                        (float) (p.z - camera.z))
+                .setColor(1f, 1f, 1f, corner.alpha(layer, now))
+                .setUv(corner.textureU, corner.textureV)
+                .setOverlay(OverlayTexture.NO_OVERLAY)
+                .setLight(layer.isEmissive() ? LightTexture.FULL_BRIGHT : light)
+                .setNormal((float) n.x, (float) n.y, (float) n.z);
+    }
+
+    private static float intensity(BurningBlock block, int index, double now) {
+        if (block.quenched || block.ignition[index] == BurningBlock.UNBURNED) return 0;
+        double age = now - block.ignition[index];
+        return clamp(age / 5) * clamp((block.fuel.flameTicks - age) / 35);
+    }
+
+    private static float clamp(double value) {
+        return (float) Math.clamp(value, 0, 1);
+    }
+
+    private static float noise(long value) {
+        value = (value ^ (value >>> 23)) * 0xBF58476D1CE4E5B9L;
+        return ((value ^ (value >>> 31)) & 65535) / 65535f;
+    }
+}

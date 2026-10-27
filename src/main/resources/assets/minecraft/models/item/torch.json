@@ -1,0 +1,11 @@
+{
+  "parent": "minecraft:block/torch",
+  "overrides": [
+    {
+      "predicate": {
+        "surfacefire:extinguished": 1
+      },
+      "model": "surfacefire:item/extinguished_torch"
+    }
+  ]
+}

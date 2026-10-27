@@ -1,0 +1,137 @@
+package com.zerotheabsolute.surfacefire.client;
+
+import com.zerotheabsolute.surfacefire.SurfaceFire;
+import com.zerotheabsolute.surfacefire.audio.CombustionState;
+import com.zerotheabsolute.surfacefire.client.audio.FireAudioStream;
+import com.zerotheabsolute.surfacefire.torch.TorchSounds;
+import com.zerotheabsolute.surfacefire.torch.TorchState;
+
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.client.resources.sounds.AbstractTickableSoundInstance;
+import net.minecraft.client.resources.sounds.Sound;
+import net.minecraft.client.sounds.AudioStream;
+import net.minecraft.client.sounds.SoundBufferLibrary;
+import net.minecraft.client.sounds.SoundManager;
+import net.minecraft.client.sounds.WeighedSoundEvents;
+import net.minecraft.sounds.SoundSource;
+import net.minecraft.util.RandomSource;
+import net.minecraft.util.valueproviders.ConstantFloat;
+import net.minecraft.world.level.Level;
+import net.neoforged.api.distmarker.Dist;
+import net.neoforged.bus.api.SubscribeEvent;
+import net.neoforged.fml.common.EventBusSubscriber;
+import net.neoforged.neoforge.client.event.ClientPlayerNetworkEvent;
+import net.neoforged.neoforge.client.event.ClientTickEvent;
+
+import java.util.concurrent.CompletableFuture;
+
+/** A single combustion-driven stream follows the local player's lit torch. */
+@EventBusSubscriber(modid = SurfaceFire.MOD_ID, value = Dist.CLIENT)
+public final class TorchAudio {
+    private static final float FADE = .2f;
+    private static final float BURN_VOLUME = .3234f;
+    private static Loop burn;
+
+    private TorchAudio() {}
+
+    private static boolean lit(LocalPlayer player) {
+        return player != null
+                && (TorchState.isLit(player.getMainHandItem())
+                        || TorchState.isLit(player.getOffhandItem()));
+    }
+
+    @SubscribeEvent
+    public static void tick(ClientTickEvent.Post event) {
+        var mc = Minecraft.getInstance();
+        if (mc.isPaused()) return;
+        boolean audible =
+                mc.options.getSoundSourceVolume(SoundSource.MASTER) > 0
+                        && mc.options.getSoundSourceVolume(SoundSource.BLOCKS) > 0;
+        if (!audible) {
+            clear();
+            return;
+        }
+        if (lit(mc.player)
+                && (burn == null
+                        || burn.isStopped()
+                        || burn.owner != mc.player
+                        || burn.level != mc.level
+                        || !mc.getSoundManager().isActive(burn))) {
+            if (burn != null) mc.getSoundManager().stop(burn);
+            burn = new Loop(mc.player);
+            mc.getSoundManager().play(burn);
+        }
+    }
+
+    @SubscribeEvent
+    public static void logout(ClientPlayerNetworkEvent.LoggingOut event) {
+        clear();
+    }
+
+    private static void clear() {
+        if (burn != null) Minecraft.getInstance().getSoundManager().stop(burn);
+        burn = null;
+    }
+
+    private static final class Loop extends AbstractTickableSoundInstance {
+        private final LocalPlayer owner;
+        private final Level level;
+        private volatile CombustionState controls = CombustionState.SILENT;
+
+        Loop(LocalPlayer owner) {
+            super(TorchSounds.BURN.get(), SoundSource.BLOCKS, RandomSource.create());
+            this.owner = owner;
+            level = owner.level();
+            looping = true;
+            delay = 0;
+            relative = true;
+            attenuation = Attenuation.NONE;
+            volume = 0;
+            pitch = 1;
+        }
+
+        @Override
+        public WeighedSoundEvents resolve(SoundManager manager) {
+            var event = super.resolve(manager);
+            sound =
+                    new Sound(
+                            getLocation(),
+                            ConstantFloat.of(1),
+                            ConstantFloat.of(1),
+                            1,
+                            Sound.Type.FILE,
+                            true,
+                            false,
+                            16);
+            return event;
+        }
+
+        @Override
+        public CompletableFuture<AudioStream> getStream(
+                SoundBufferLibrary buffers, Sound sound, boolean looping) {
+            return CompletableFuture.completedFuture(
+                    new FireAudioStream(() -> controls, random.nextLong()));
+        }
+
+        @Override
+        public boolean canStartSilent() {
+            return true;
+        }
+
+        @Override
+        public void tick() {
+            boolean valid =
+                    owner == Minecraft.getInstance().player
+                            && level == Minecraft.getInstance().level
+                            && lit(owner);
+            controls =
+                    valid
+                            ? new CombustionState(1, 1, 0, TorchAirflow.speed(), .55f)
+                            : CombustionState.SILENT;
+            float target = valid ? BURN_VOLUME : 0;
+            volume += (target - volume) * FADE;
+            if (!valid && volume < .001f) stop();
+        }
+    }
+}

@@ -1,0 +1,162 @@
+{
+  "parent": "minecraft:block/torch",
+  "textures": {
+    "char": "minecraft:block/coal_block"
+  },
+  "elements": [
+    {
+      "from": [
+        -1,
+        3.5,
+        7
+      ],
+      "to": [
+        1,
+        11.5,
+        9
+      ],
+      "faces": {
+        "up": {
+          "uv": [
+            7,
+            8,
+            9,
+            16
+          ],
+          "texture": "#torch"
+        },
+        "down": {
+          "uv": [
+            7,
+            8,
+            9,
+            16
+          ],
+          "texture": "#torch"
+        },
+        "north": {
+          "uv": [
+            7,
+            8,
+            9,
+            16
+          ],
+          "texture": "#torch"
+        },
+        "south": {
+          "uv": [
+            7,
+            8,
+            9,
+            16
+          ],
+          "texture": "#torch"
+        },
+        "east": {
+          "uv": [
+            7,
+            8,
+            9,
+            16
+          ],
+          "texture": "#torch"
+        },
+        "west": {
+          "uv": [
+            7,
+            8,
+            9,
+            16
+          ],
+          "texture": "#torch"
+        }
+      },
+      "rotation": {
+        "origin": [
+          0,
+          3.5,
+          8
+        ],
+        "axis": "z",
+        "angle": -22.5
+      }
+    },
+    {
+      "from": [
+        -1,
+        11.5,
+        7
+      ],
+      "to": [
+        1,
+        13.5,
+        9
+      ],
+      "faces": {
+        "up": {
+          "uv": [
+            4,
+            4,
+            8,
+            8
+          ],
+          "texture": "#char"
+        },
+        "down": {
+          "uv": [
+            4,
+            4,
+            8,
+            8
+          ],
+          "texture": "#char"
+        },
+        "north": {
+          "uv": [
+            4,
+            4,
+            8,
+            8
+          ],
+          "texture": "#char"
+        },
+        "south": {
+          "uv": [
+            4,
+            4,
+            8,
+            8
+          ],
+          "texture": "#char"
+        },
+        "east": {
+          "uv": [
+            4,
+            4,
+            8,
+            8
+          ],
+          "texture": "#char"
+        },
+        "west": {
+          "uv": [
+            4,
+            4,
+            8,
+            8
+          ],
+          "texture": "#char"
+        }
+      },
+      "rotation": {
+        "origin": [
+          0,
+          3.5,
+          8
+        ],
+        "axis": "z",
+        "angle": -22.5
+      }
+    }
+  ]
+}

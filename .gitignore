@@ -1,0 +1,11 @@
+.gradle
+build
+run/
+run-server/
+.idea/
+*.iml
+.DS_Store
+__pycache__/
+*.jfr
+hs_err_pid*.log
+replay_pid*.log

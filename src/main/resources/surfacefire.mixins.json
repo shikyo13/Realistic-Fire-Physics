@@ -1,0 +1,17 @@
+{
+  "required": true,
+  "package": "com.zerotheabsolute.surfacefire.client.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "client": [
+    "TorchItemMixin",
+    "TorchEntityAirflowMixin",
+    "HeldTorchAirflowMixin",
+    "TorchParticleMixin",
+    "TorchItemLightMixin",
+    "CandleFlameMixin",
+    "TerrainScorchMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
