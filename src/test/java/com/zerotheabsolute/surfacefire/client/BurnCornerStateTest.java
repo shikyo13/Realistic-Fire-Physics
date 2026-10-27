@@ -9,6 +9,41 @@ import com.zerotheabsolute.surfacefire.FireSettings;
 import org.junit.jupiter.api.Test;
 
 class BurnCornerStateTest {
+    @Test
+    void pausedClockFreezesFuelEnvelopeAndResumeRemainsContinuous() {
+        var cells = new FirePacket.Sample[] {sample(1, 100, false)};
+        var state = new BurnCornerState(cells);
+        var clocks = com.zerotheabsolute.surfacefire.simulation.FireClocks.get(null);
+        try {
+            com.zerotheabsolute.surfacefire.simulation.FireClocks.receive(
+                    new com.zerotheabsolute.surfacefire.simulation.FireClockPacket(
+                            "test",
+                            true,
+                            java.util.List.of(
+                                    new com.zerotheabsolute.surfacefire.simulation.FireClockPacket
+                                            .State(0, 0, 104))));
+            state.update(104, clocks);
+            float cover = state.cover, heat = state.heat, ember = state.ember;
+            state.update(10000, clocks);
+            assertEquals(cover, state.cover);
+            assertEquals(heat, state.heat);
+            assertEquals(ember, state.ember);
+            com.zerotheabsolute.surfacefire.simulation.FireClocks.receive(
+                    new com.zerotheabsolute.surfacefire.simulation.FireClockPacket(
+                            "test",
+                            false,
+                            java.util.List.of(
+                                    new com.zerotheabsolute.surfacefire.simulation.FireClockPacket
+                                            .State(0, 9896, -1))));
+            state.update(10000, clocks);
+            assertEquals(cover, state.cover);
+            state.update(10002, clocks);
+            assertTrue(state.cover > cover);
+        } finally {
+            com.zerotheabsolute.surfacefire.simulation.FireClocks.clearClient();
+        }
+    }
+
     private static FirePacket.Sample sample(int fuel, long time, boolean quenched) {
         return new FirePacket.Sample(new FireField.Site(0, 0, 0), time, fuel, quenched);
     }

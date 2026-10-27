@@ -11,6 +11,19 @@ class FireOutbreaksTest {
     private static final FireOutbreaks.Fuel WOOD = FireOutbreaks.Fuel.STRUCTURE;
 
     @Test
+    void pausedOutbreakKeepsItsSpentAllowanceWithoutBlockingIndependentFires() {
+        var budgets = new FireOutbreaks();
+        long paused = budgets.claim(GROUND, 0, 100, 200, 1);
+        budgets.retain(paused, 1200);
+        budgets.tick(1000);
+        assertEquals(paused, budgets.live(paused, 1000));
+        assertEquals(0, budgets.claim(GROUND, paused, 1000, 1200, 1));
+        assertNotEquals(0, budgets.claim(GROUND, 0, 1000, 1200, 1));
+        budgets.tick(1250);
+        assertEquals(0, budgets.live(paused, 1250));
+    }
+
+    @Test
     void exhaustedFireDoesNotBlockAnIndependentIgnition() {
         var budgets = new FireOutbreaks();
         long a = budgets.claim(GROUND, 0, 100, 200, 2);

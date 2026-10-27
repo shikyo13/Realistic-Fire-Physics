@@ -12,12 +12,13 @@ void main() {
     float time=GameTime*1200.0;
     float seed=tint.b*63.0;
     float y=uv.y;
-    float sway=(noise(vec2(y*3.6-time*2.9,seed))-.5)*(.15+y*.65);
+    float wave=sin(time*12.5+seed-y*5.0)*.075+sin(time*18.3+seed*.63-y*8.0)*.020;
+    float sway=wave*y+(noise(vec2(y*2.4-time*2.9,seed))-.5)*y*.24;
     float x=(uv.x-.5+sway)*2.0;
-    vec2 flow=vec2(x*4.7+seed,y*5.7-time*6.3);
-    float n=fbm(flow+vec2(fbm(flow*.75+4.0)*2.1,0));
+    vec2 flow=vec2(x*3.6+seed,y*4.8-time*7.8);
+    float n=fbm(flow+vec2(fbm(flow*.75+4.0)*1.5,0));
     float envelope=1.0-pow(abs(x),.8)*(1.25+y*1.2)-y*.88;
-    float density=envelope+(n-.5)*1.45;
+    float density=envelope+(n-.5)*mix(.45,.95,y);
     float mask=smoothstep(-.02,.35,density)*smoothstep(1.0,.72,y)*smoothstep(0.0,RootSoftness,y);
     float core=smoothstep(.32,.88,density)*(1.0-y*.8);
     vec3 color=fireRadiance(core);

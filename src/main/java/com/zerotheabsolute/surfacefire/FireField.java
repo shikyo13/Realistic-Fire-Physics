@@ -1,5 +1,8 @@
 package com.zerotheabsolute.surfacefire;
 
+import com.zerotheabsolute.surfacefire.simulation.ChunkFireQueue;
+import com.zerotheabsolute.surfacefire.simulation.FireClocks;
+
 import net.minecraft.core.*;
 import net.minecraft.nbt.*;
 import net.minecraft.server.level.*;
@@ -28,13 +31,15 @@ public final class FireField extends SavedData {
 
     private static final class HotPatch {
         final Set<Site> sites = new HashSet<>();
+        int liveSites;
         long coolAt, flameUntil, vegetationAt = Long.MAX_VALUE, torchAt = Long.MAX_VALUE;
         long structureAt = Long.MAX_VALUE;
     }
 
     private final Map<Site, FirePacket.Sample> samples = new LinkedHashMap<>();
-    private final PriorityQueue<Pending> frontier =
-            new PriorityQueue<>(Comparator.comparingLong(Pending::due));
+    private final ChunkFireQueue<Pending> frontier =
+            new ChunkFireQueue<>(p -> ChunkPos.asLong(p.source.block()), Pending::due);
+    private FireClocks clocks;
     private final Map<Site, Pending> scheduled = new HashMap<>();
     private final Map<Site, FirePacket.Sample> changed = new LinkedHashMap<>();
     private final TorchIgnition torches = new TorchIgnition(this);
@@ -54,6 +59,10 @@ public final class FireField extends SavedData {
                         .computeIfAbsent(
                                 new SavedData.Factory<>(FireField::new, FireField::load),
                                 "surface_fire");
+        if (field.clocks == null) {
+            field.clocks = FireClocks.get(level);
+            for (var sample : field.samples.values()) field.clocks.retain(sample.block());
+        }
         BurnChanges.observe(level, field);
         return field;
     }
@@ -155,27 +164,39 @@ public final class FireField extends SavedData {
                         now + coolTime(fuel),
                         FireSettings.MAX_SAMPLES.get());
         if (owner == 0) return false;
-        var sample = new FirePacket.Sample(site, now, fuel, false).withOutbreak(owner);
+        long burnTime = clocks.activate(level, site.block());
+        var sample = new FirePacket.Sample(site, burnTime, fuel, false).withOutbreak(owner);
         put(sample);
         track(sample);
         ignitions++;
-        schedule(level, site, level.getGameTime());
+        schedule(level, site, burnTime);
         return true;
     }
 
     private void put(FirePacket.Sample s) {
         if (!samples.containsKey(s.site())) {
             historyCleanup.added(s.site());
+            if (clocks != null) clocks.retain(s.block());
             retainedBlocks.merge(s.block(), 1, Integer::sum);
         }
-        samples.put(s.site(), s);
+        var previous = samples.put(s.site(), s);
+        if (previous != null && !previous.quenched() && s.quenched()) {
+            var patch = hotPatches.get(s.block());
+            if (patch != null) patch.liveSites--;
+        }
         changed.put(s.site(), s);
         setDirty();
     }
 
     private void track(FirePacket.Sample s) {
-        var patch = hotPatches.computeIfAbsent(s.block(), key -> new HotPatch());
-        patch.sites.add(s.site());
+        clocks.track(s.block(), s.ignition() + coolTime(s.fuel()), s.outbreak());
+        var patch = hotPatches.get(s.block());
+        if (patch == null) {
+            patch = new HotPatch();
+            hotPatches.put(s.block(), patch);
+            clocks.heated(s.block());
+        }
+        if (patch.sites.add(s.site())) patch.liveSites++;
         patch.coolAt = Math.max(patch.coolAt, s.ignition() + coolTime(s.fuel()));
         patch.flameUntil = Math.max(patch.flameUntil, s.ignition() + lifetime(s.fuel()));
         patch.torchAt =
@@ -207,16 +228,20 @@ public final class FireField extends SavedData {
                 var next = source.offset(dx, dz);
                 var previous = samples.get(next);
                 if (previous != null) {
-                    FireOutbreaks.get(level).merge(origin.outbreak(), previous.outbreak(), now);
+                    FireOutbreaks.get(level)
+                            .merge(origin.outbreak(), previous.outbreak(), level.getGameTime());
                     continue;
                 }
                 long delay = 6 + Math.floorMod(hash(next), 7);
                 if (dx != 0 && dz != 0) delay = (delay * 14) / 10;
                 long due = now + FireSettings.spreadDelay(delay);
                 var queued = scheduled.get(next);
-                if (queued != null && queued.due <= due) {
+                if (queued != null
+                        && clocks.deadline(queued.source.block(), queued.due)
+                                <= clocks.deadline(source.block(), due)) {
                     var previousSource = samples.get(queued.source);
-                    if (previousSource == queued.origin && burning(previousSource, now)) continue;
+                    if (previousSource == queued.origin
+                            && burning(previousSource, level.getGameTime())) continue;
                 }
                 var pending = new Pending(next, source, origin, due);
                 scheduled.put(next, pending);
@@ -225,7 +250,13 @@ public final class FireField extends SavedData {
     }
 
     private boolean burning(FirePacket.Sample s, long now) {
-        return s != null && !s.quenched() && now - s.ignition() < lifetime(s.fuel());
+        return s != null
+                && !s.quenched()
+                && time(s.block(), now) - s.ignition() < lifetime(s.fuel());
+    }
+
+    private long time(BlockPos pos, long now) {
+        return clocks == null ? now : clocks.time(pos, now);
     }
 
     public void tick(ServerLevel level) {
@@ -240,28 +271,13 @@ public final class FireField extends SavedData {
         spread(level, now);
         cleanHistory(level, now);
         if (now % FireSettings.TORCH_CHECK_TICKS == 0) torches.tick(level, now);
-        for (var sample : changed.values()) FireLighting.get(level).accept(sample, now);
+        for (var sample : changed.values())
+            FireLighting.get(level).accept(sample, time(sample.block(), now));
         FireLighting.get(level).tick(level, it.unimi.dsi.fastutil.longs.Long2ByteMaps.EMPTY_MAP);
         if (now % 2 == 0 && !changed.isEmpty()) {
             for (var player : level.players())
                 send(player, false, new ArrayList<>(changed.values()));
             changed.clear();
-        }
-        if (now % 40 == 0) {
-            for (var player : level.players()) {
-                for (var entry : hotPatches.entrySet())
-                    if (entry.getValue().flameUntil > now
-                            && entry.getKey().distSqr(player.blockPosition()) < 256) {
-                        level.playSound(
-                                null,
-                                entry.getKey(),
-                                SoundEvents.FIRE_AMBIENT,
-                                SoundSource.BLOCKS,
-                                .45f,
-                                .85f + level.random.nextFloat() * .2f);
-                        break;
-                    }
-            }
         }
         lastProbes = probes.size();
         peakProbes = Math.max(peakProbes, lastProbes);
@@ -276,20 +292,21 @@ public final class FireField extends SavedData {
             var outbreaks = FireOutbreaks.get(level);
             for (var s : samples.values()) {
                 if (!s.quenched()
-                        && now - s.ignition() < coolTime(s.fuel())
+                        && time(s.block(), now) - s.ignition() < coolTime(s.fuel())
                         && outbreaks.live(s.outbreak(), now) == 0) {
                     legacy =
                             outbreaks.adopt(
                                     FireOutbreaks.Fuel.GROUND,
                                     legacy,
                                     now,
-                                    s.ignition() + coolTime(s.fuel()));
+                                    now + s.ignition() + coolTime(s.fuel()) - time(s.block(), now));
                     s = s.withOutbreak(legacy);
                     put(s);
                 }
-                FireLighting.get(level).accept(s, now);
-                if (!s.quenched() && now - s.ignition() < coolTime(s.fuel())) track(s);
-                if (burning(s, now)) schedule(level, s.site(), now);
+                FireLighting.get(level).accept(s, time(s.block(), now));
+                if (!s.quenched() && time(s.block(), now) - s.ignition() < coolTime(s.fuel()))
+                    track(s);
+                if (burning(s, now)) schedule(level, s.site(), time(s.block(), now));
             }
         }
     }
@@ -301,29 +318,33 @@ public final class FireField extends SavedData {
                 var entry = patches.next();
                 var p = entry.getKey();
                 var patch = entry.getValue();
-                if (now >= patch.coolAt) {
+                long local = time(p, now);
+                if (patch.liveSites == 0 || local >= patch.coolAt) {
                     patches.remove();
+                    clocks.cooled(p);
                     continue;
                 }
-                if (!level.hasChunkAt(p)) continue;
+                if (!FireClocks.ticking(level, ChunkPos.asLong(p))) continue;
                 var probe = probe(level, p);
                 if (probe.fuel == 0 || probe.rain) {
                     for (var site : patch.sites) {
                         var s = samples.get(site);
-                        if (!s.quenched() && now - s.ignition() < coolTime(s.fuel())) {
-                            put(s.quench(now));
+                        if (!s.quenched()
+                                && time(s.block(), now) - s.ignition() < coolTime(s.fuel())) {
+                            put(s.quench(local));
                             extinguished++;
                         }
                     }
                     patches.remove();
+                    clocks.cooled(p);
                     continue;
                 }
-                if (now >= patch.vegetationAt) {
+                if (local >= patch.vegetationAt) {
                     float exposure = 0;
                     boolean alive = false;
                     for (var site : patch.sites) {
                         var sample = samples.get(site);
-                        exposure += VegetationScorch.exposure(sample, now);
+                        exposure += VegetationScorch.exposure(sample, local);
                         alive |= burning(sample, now);
                     }
                     boolean consumed = exposure / 64 >= FireSettings.VEGETATION_CONSUMED_FRACTION;
@@ -331,11 +352,11 @@ public final class FireField extends SavedData {
                         level.destroyBlock(p.above(), false);
                     patch.vegetationAt =
                             alive && !consumed
-                                    ? now + FireSettings.ENVIRONMENT_CHECK_TICKS
+                                    ? local + FireSettings.ENVIRONMENT_CHECK_TICKS
                                     : Long.MAX_VALUE;
                     probes.remove(p);
                 }
-                if (now >= patch.structureAt) {
+                if (local >= patch.structureAt) {
                     long owner = 0;
                     var outbreaks = FireOutbreaks.get(level);
                     for (var site : patch.sites)
@@ -344,8 +365,8 @@ public final class FireField extends SavedData {
                             .igniteAboveGround(level, p, owner);
                     patch.structureAt = Long.MAX_VALUE;
                 }
-                if (now >= patch.torchAt) {
-                    if (now < patch.flameUntil
+                if (local >= patch.torchAt) {
+                    if (local < patch.flameUntil
                             && com.zerotheabsolute.surfacefire.torch.TorchBlocks.isTorch(
                                     level.getBlockState(p.above()))) {
                         level.destroyBlock(p.above(), false);
@@ -359,13 +380,11 @@ public final class FireField extends SavedData {
 
     private void spread(ServerLevel level, long now) {
         if (level.getGameRules().getBoolean(GameRules.RULE_DOFIRETICK)) {
-            for (int budget = 0;
-                    budget < FireSettings.SPREAD_WORK_PER_TICK.get()
-                            && !frontier.isEmpty()
-                            && frontier.peek().due <= now;
-                    budget++) {
+            frontier.prepare(clocks::clock);
+            for (int budget = 0; budget < FireSettings.SPREAD_WORK_PER_TICK.get(); budget++) {
+                var p = frontier.poll(now);
+                if (p == null) break;
                 lastSteps++;
-                var p = frontier.remove();
                 if (!scheduled.remove(p.site, p)) continue;
                 var source = samples.get(p.source);
                 if (!burning(source, now)
@@ -403,7 +422,7 @@ public final class FireField extends SavedData {
         } else if ((now + entity.getId()) % FireSettings.SMOLDER_DAMAGE_INTERVAL_TICKS == 0
                 && sample != null
                 && !sample.quenched()
-                && now - sample.ignition() < coolTime(sample.fuel())) {
+                && time(sample.block(), now) - sample.ignition() < coolTime(sample.fuel())) {
             entity.hurt(entity.damageSources().hotFloor(), FireSettings.CONTACT_DAMAGE);
         }
     }
@@ -425,8 +444,9 @@ public final class FireField extends SavedData {
                 var sample = samples.get(site);
                 if (sample == null
                         || sample.quenched()
-                        || now - sample.ignition() >= coolTime(sample.fuel())) continue;
-                put(sample.quench(now));
+                        || time(sample.block(), now) - sample.ignition() >= coolTime(sample.fuel()))
+                    continue;
+                put(sample.quench(time(sample.block(), now)));
                 extinguished++;
                 count++;
             }
@@ -451,7 +471,7 @@ public final class FireField extends SavedData {
     void replaced(ServerLevel level, BlockPos pos) {
         probes.remove(pos);
         if (!retainedBlocks.containsKey(pos)) return;
-        hotPatches.remove(pos);
+        if (hotPatches.remove(pos) != null) clocks.cooled(pos);
         FireLighting.get(level).removeGround(pos);
         for (int x = 0; x < 8; x++)
             for (int z = 0; z < 8; z++) {
@@ -467,10 +487,14 @@ public final class FireField extends SavedData {
                 sample.block(), (key, count) -> count == 1 ? null : count - 1);
         var patch = hotPatches.get(sample.block());
         if (patch != null) {
-            patch.sites.remove(site);
-            if (patch.sites.isEmpty()) hotPatches.remove(sample.block());
+            if (patch.sites.remove(site) && !sample.quenched()) patch.liveSites--;
+            if (patch.sites.isEmpty()) {
+                hotPatches.remove(sample.block());
+                clocks.cooled(sample.block());
+            }
         }
         historyCleanup.removed(site);
+        if (clocks != null) clocks.release(sample.block());
         changed.put(site, new FirePacket.Sample(site, 0, 0, false));
         scheduled.remove(site);
         setDirty();
@@ -486,7 +510,7 @@ public final class FireField extends SavedData {
                     var sample = samples.get(site);
                     if (sample == null) return false;
                     if (!HistoryCleanup.eligible(
-                            now,
+                            time(sample.block(), now),
                             sample.ignition() + coolTime(sample.fuel()),
                             seconds,
                             capacity > 0 && samples.size() > capacity)) return true;
@@ -516,7 +540,8 @@ public final class FireField extends SavedData {
                                 s ->
                                         !s.quenched()
                                                 && !burning(s, level.getGameTime())
-                                                && level.getGameTime() - s.ignition()
+                                                && time(s.block(), level.getGameTime())
+                                                                - s.ignition()
                                                         < coolTime(s.fuel()))
                         .count();
         long blocks = samples.keySet().stream().map(Site::block).distinct().count();
@@ -573,6 +598,7 @@ public final class FireField extends SavedData {
         for (var player : level.players()) sendSnapshot(player);
         com.zerotheabsolute.surfacefire.structure.StructureField.get(level).clear(level);
         FireOutbreaks.get(level).clear();
+        clocks.clear(level);
         return n;
     }
 

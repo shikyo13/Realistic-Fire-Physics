@@ -6,6 +6,8 @@ import com.zerotheabsolute.surfacefire.FireLighting;
 import com.zerotheabsolute.surfacefire.FireOutbreaks;
 import com.zerotheabsolute.surfacefire.FireSettings;
 import com.zerotheabsolute.surfacefire.HistoryCleanup;
+import com.zerotheabsolute.surfacefire.simulation.ChunkFireQueue;
+import com.zerotheabsolute.surfacefire.simulation.FireClocks;
 
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
@@ -21,6 +23,7 @@ import net.minecraft.nbt.Tag;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.GameRules;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.saveddata.SavedData;
@@ -41,8 +44,9 @@ public final class StructureField extends SavedData {
 
     private final Long2ObjectOpenHashMap<BurningBlock> blocks = new Long2ObjectOpenHashMap<>();
     private final LongOpenHashSet active = new LongOpenHashSet();
-    private final PriorityQueue<Pending> frontier =
-            new PriorityQueue<>(Comparator.comparingLong(Pending::due));
+    private final ChunkFireQueue<Pending> frontier =
+            new ChunkFireQueue<>(p -> ChunkPos.asLong(p.source.block()), Pending::due);
+    private FireClocks clocks;
     private final List<StructurePacket.Change> changes = new ArrayList<>();
     private StructureTerrain terrain;
     private boolean recovered;
@@ -52,6 +56,10 @@ public final class StructureField extends SavedData {
 
     public static StructureField get(ServerLevel level) {
         var field = level.getDataStorage().computeIfAbsent(FACTORY, SAVE_NAME);
+        if (field.clocks == null) {
+            field.clocks = FireClocks.get(level);
+            for (var block : field.blocks.values()) field.clocks.retain(block.pos);
+        }
         BurnChanges.observe(level, field);
         return field;
     }
@@ -102,14 +110,17 @@ public final class StructureField extends SavedData {
             block = new BurningBlock(cell.block(), probe.state(), probe.fuel());
             blocks.put(cell.block().asLong(), block);
             historyCleanup.added(cell.block().asLong());
+            clocks.retain(block.pos);
         }
         block.outbreak = owner;
-        block.ignite(cell.index(), now);
+        long local = clocks.activate(level, block.pos);
+        block.ignite(cell.index(), local);
+        clocks.track(block.pos, block.coolAt(), owner);
         ignitedCells++;
-        active.add(cell.block().asLong());
+        if (active.add(cell.block().asLong())) clocks.heated(block.pos);
         changes.add(change(block, cell.index()));
         FireLighting.get(level).acceptStructure(block);
-        schedule(cell, block.fuel, level.getGameTime());
+        schedule(cell, block.fuel, local);
         setDirty();
         return true;
     }
@@ -155,33 +166,41 @@ public final class StructureField extends SavedData {
             long legacy = 0;
             var outbreaks = FireOutbreaks.get(level);
             for (var block : blocks.values()) {
-                if (block.quenched || now >= block.coolAt()) continue;
+                if (block.quenched || clocks.time(block.pos, now) >= block.coolAt()) continue;
                 if (outbreaks.live(block.outbreak, now) == 0) {
                     for (int i = 0; i < block.count; i++)
                         legacy =
                                 outbreaks.adopt(
-                                        FireOutbreaks.Fuel.STRUCTURE, legacy, now, block.coolAt());
+                                        FireOutbreaks.Fuel.STRUCTURE,
+                                        legacy,
+                                        now,
+                                        now + block.coolAt() - clocks.time(block.pos, now));
                     block.outbreak = legacy;
                     setDirty();
                 }
-                active.add(block.pos.asLong());
+                clocks.track(block.pos, block.coolAt(), block.outbreak);
+                if (active.add(block.pos.asLong())) clocks.heated(block.pos);
                 FireLighting.get(level).acceptStructure(block);
                 for (int i = 0; i < block.ignition.length; i++)
-                    if (block.burning(i, now))
-                        schedule(SurfaceCell.fromIndex(block.pos, i), block.fuel, now);
+                    if (block.burning(i, clocks.time(block.pos, now)))
+                        schedule(
+                                SurfaceCell.fromIndex(block.pos, i),
+                                block.fuel,
+                                clocks.time(block.pos, now));
             }
         }
         lastSteps = 0;
         if (level.getGameRules().getBoolean(GameRules.RULE_DOFIRETICK)) {
-            while (lastSteps < FireSettings.STRUCTURE_WORK_PER_TICK.get()
-                    && !frontier.isEmpty()
-                    && frontier.peek().due <= now) {
-                var pending = frontier.remove();
+            frontier.prepare(clocks::clock);
+            while (lastSteps < FireSettings.STRUCTURE_WORK_PER_TICK.get()) {
+                var pending = frontier.poll(now);
+                if (pending == null) break;
                 lastSteps++;
                 var source = blocks.get(pending.source.block().asLong());
                 if (source == null
                         || source != pending.origin
-                        || !source.burning(pending.source.index(), now)) continue;
+                        || !source.burning(pending.source.index(), clocks.time(source.pos, now)))
+                    continue;
                 var probe = access.probe(source.pos);
                 if (probe.wet() || !source.matches(probe.state())) continue;
                 for (var step : STEPS) {
@@ -207,13 +226,16 @@ public final class StructureField extends SavedData {
             var block = blocks.get(key);
             if (block == null) {
                 iterator.remove();
+                clocks.cooled(BlockPos.of(key));
                 continue;
             }
-            if (!level.hasChunkAt(block.pos)) continue;
+            if (!FireClocks.ticking(level, ChunkPos.asLong(block.pos))) continue;
+            long local = clocks.time(block.pos, now);
             var probe = terrain.probe(block.pos);
             if (!block.matches(probe.state())) {
                 remove(level, block);
                 iterator.remove();
+                clocks.cooled(BlockPos.of(key));
                 continue;
             }
             if (probe.wet()) {
@@ -222,14 +244,19 @@ public final class StructureField extends SavedData {
                 changes.add(change(block, StructurePacket.QUENCH));
                 FireLighting.get(level).removeStructure(key);
                 iterator.remove();
+                clocks.cooled(block.pos);
                 setDirty();
                 continue;
             }
-            if (now >= block.firstIgnition + block.fuel.consumeTicks
+            if (local >= block.firstIgnition + block.fuel.consumeTicks
                     && block.count >= MINIMUM_CONSUMED_CELLS) {
                 consumed.add(block);
                 iterator.remove();
-            } else if (now >= block.coolAt()) iterator.remove();
+                clocks.cooled(block.pos);
+            } else if (local >= block.coolAt()) {
+                iterator.remove();
+                clocks.cooled(block.pos);
+            }
         }
         for (var block : consumed) consume(level, block);
     }
@@ -259,6 +286,7 @@ public final class StructureField extends SavedData {
     private void remove(ServerLevel level, BurningBlock block) {
         if (blocks.remove(block.pos.asLong()) == null) return;
         historyCleanup.removed(block.pos.asLong());
+        clocks.release(block.pos);
         changes.add(change(block, StructurePacket.REMOVE));
         FireLighting.get(level).removeStructure(block.pos.asLong());
         setDirty();
@@ -271,7 +299,7 @@ public final class StructureField extends SavedData {
         if (terrain != null) terrain.invalidate(pos);
         var block = blocks.get(pos.asLong());
         if (block != null && !block.matches(state)) {
-            active.remove(pos.asLong());
+            if (active.remove(pos.asLong())) clocks.cooled(pos);
             remove(level, block);
         }
     }
@@ -286,8 +314,11 @@ public final class StructureField extends SavedData {
                     var block = blocks.get(key);
                     if (block == null) return false;
                     if (!HistoryCleanup.eligible(
-                            now, block.coolAt(), seconds, capacity > 0 && blocks.size() > capacity))
-                        return true;
+                            clocks.time(block.pos, now),
+                            block.coolAt(),
+                            seconds,
+                            capacity > 0 && blocks.size() > capacity)) return true;
+                    if (active.remove(key)) clocks.cooled(block.pos);
                     remove(level, block);
                     return false;
                 });
@@ -304,8 +335,10 @@ public final class StructureField extends SavedData {
                         BlockPos.containing(box.minX, box.minY, box.minZ),
                         BlockPos.containing(box.maxX, box.maxY, box.maxZ))) {
             var block = blocks.get(pos.asLong());
-            if (block == null || block.quenched || now >= block.coolAt()) continue;
-            if (now < block.lastIgnition + block.fuel.flameTicks) {
+            if (block == null || block.quenched) continue;
+            long local = clocks.time(block.pos, now);
+            if (local >= block.coolAt()) continue;
+            if (local < block.lastIgnition + block.fuel.flameTicks) {
                 entity.hurt(entity.damageSources().inFire(), FireSettings.CONTACT_DAMAGE);
                 entity.igniteForSeconds(FireSettings.CONTACT_IGNITE_SECONDS);
             } else if ((now + entity.getId()) % FireSettings.SMOLDER_DAMAGE_INTERVAL_TICKS == 0)
@@ -345,7 +378,10 @@ public final class StructureField extends SavedData {
     }
 
     public void clear(ServerLevel level) {
-        for (long key : blocks.keySet()) FireLighting.get(level).removeStructure(key);
+        for (var block : blocks.values()) {
+            FireLighting.get(level).removeStructure(block.pos.asLong());
+            clocks.release(block.pos);
+        }
         blocks.clear();
         active.clear();
         frontier.clear();

@@ -18,10 +18,12 @@ void main() {
     float n=fbm(flow+vec2(fbm(flow*.7+4.0)*1.4,0));
     float envelope=1.10-pow(abs(x),1.25)*(1.22+y*.55)-y*.94;
     float density=envelope+(n-.5)*mix(.32,1.10,y);
-    float mask=smoothstep(-.08,.23,density)*smoothstep(1.0,.76,y)*smoothstep(0.0,.015,y);
+    float baseCurve=.13*(1.0-sqrt(max(0.0,1.0-(x/.90)*(x/.90))));
+    float roundedBase=smoothstep(-.012,.022,y-baseCurve);
+    float mask=smoothstep(-.08,.23,density)*smoothstep(1.0,.76,y)*roundedBase;
     float core=smoothstep(.32,.88,density)*(1.0-y*.8);
     vec3 color=fireRadiance(core);
-    float halo=exp(-x*x*5.0-y*7.0)*.15;
+    float halo=exp(-x*x*5.0-y*7.0)*.15*roundedBase;
     fragColor=vec4(color*(mask+halo)*tint.a,(mask+halo)*tint.a);
     if(mask+halo<.004) discard;
 }

@@ -25,6 +25,7 @@ final class FlameGeometry {
             int light) {
         double hx = right.x * width * .5, hy = right.y * width * .5, hz = right.z * width * .5;
         double tx = up.x * height, ty = up.y * height, tz = up.z * height;
+        if (!smoke) seed = FlameWave.texturePhase(x, y, z);
         int frame = textured ? ShaderPackRendering.frame(seed) : 0;
         vertex(
                 vertices, camera, textured, x - hx, y - hy, z - hz, 0, 0, frame, seed, alpha, smoke,

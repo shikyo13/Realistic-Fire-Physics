@@ -4,6 +4,7 @@ import com.zerotheabsolute.surfacefire.FireField;
 import com.zerotheabsolute.surfacefire.FirePacket;
 import com.zerotheabsolute.surfacefire.FireSettings;
 import com.zerotheabsolute.surfacefire.SurfaceFire;
+import com.zerotheabsolute.surfacefire.simulation.FireClocks;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
@@ -105,7 +106,9 @@ final class GroundBurnMasks {
                             float amount =
                                     (float)
                                             Math.clamp(
-                                                    (now - sample.ignition()) / (double) duration,
+                                                    (FireClocks.get(level).time(sample.block(), now)
+                                                                    - sample.ignition())
+                                                            / (double) duration,
                                                     0,
                                                     1);
                             changing |= amount < 1;

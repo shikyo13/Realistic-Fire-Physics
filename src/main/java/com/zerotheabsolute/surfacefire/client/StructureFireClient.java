@@ -3,6 +3,7 @@ package com.zerotheabsolute.surfacefire.client;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import com.zerotheabsolute.surfacefire.FireLighting;
 import com.zerotheabsolute.surfacefire.FireSettings;
+import com.zerotheabsolute.surfacefire.simulation.FireClocks;
 import com.zerotheabsolute.surfacefire.structure.BurningBlock;
 import com.zerotheabsolute.surfacefire.structure.StructureFuel;
 import com.zerotheabsolute.surfacefire.structure.StructurePacket;
@@ -35,6 +36,7 @@ final class StructureFireClient {
         ShaderPackRendering.GroundLayer.HEAT, ShaderPackRendering.GroundLayer.EMBER
     };
     private static final Long2ObjectOpenHashMap<Mesh> MESHES = new Long2ObjectOpenHashMap<>();
+    private static final Long2ObjectOpenHashMap<Mesh> ACTIVE = new Long2ObjectOpenHashMap<>();
     private static final List<Mesh> VISIBLE = new ArrayList<>();
     private static String dimension = "";
     private static long frame;
@@ -48,6 +50,7 @@ final class StructureFireClient {
 
     static void clear() {
         MESHES.clear();
+        ACTIVE.clear();
         VISIBLE.clear();
         dimension = "";
         lightingPending = false;
@@ -70,6 +73,7 @@ final class StructureFireClient {
             long key = change.pos().asLong();
             if (change.cell() == StructurePacket.REMOVE) {
                 MESHES.remove(key);
+                ACTIVE.remove(key);
                 StructureBurnMasks.remove(change.pos());
                 if (lighting != null) lighting.removeStructure(key);
                 continue;
@@ -84,6 +88,8 @@ final class StructureFireClient {
                                                     Block.stateById(change.state()),
                                                     change.fuel())));
             mesh.block.quenched = change.quenched();
+            if (change.quenched()) ACTIVE.remove(key);
+            else ACTIVE.put(key, mesh);
             if (change.cell() >= 0) {
                 mesh.block.ignite(change.cell(), change.ignition());
                 int face = change.cell() / SurfaceCell.FACE_CELLS;
@@ -108,11 +114,38 @@ final class StructureFireClient {
         return "surfaces=" + MESHES.size() + ", " + StructureBurnMasks.status();
     }
 
+    static void collectActivity(FireActivity activity) {
+        var level = Minecraft.getInstance().level;
+        if (level == null || !dimension.equals(level.dimension().location().toString())) return;
+        long worldTime = level.getGameTime();
+        var iterator = ACTIVE.values().iterator();
+        while (iterator.hasNext()) {
+            var mesh = iterator.next();
+            var block = mesh.block;
+            long now = FireClocks.get(level).time(block.pos, worldTime);
+            if (block.quenched || now >= block.lastIgnition + block.fuel.flameTicks) {
+                iterator.remove();
+                continue;
+            }
+            if (!level.getChunkSource().hasChunk(block.pos.getX() >> 4, block.pos.getZ() >> 4))
+                continue;
+            float heat = clamp((block.lastIgnition + block.fuel.flameTicks - now) / 24.0);
+            float coverage = Math.min(1, block.count / 64f);
+            activity.add(
+                    block.pos.getX() + .5,
+                    block.pos.getY() + .5,
+                    block.pos.getZ() + .5,
+                    heat * coverage * (block.fuel == StructureFuel.LEAVES ? 1.5f : 3f),
+                    block.fuel == StructureFuel.LEAVES ? .35f : 1f);
+        }
+    }
+
     private static final class Mesh {
         final BurningBlock block;
         final Face[] faces = new Face[6];
         final AABB bounds;
         int light;
+        double time;
         final FlameMotion motion = new FlameMotion();
 
         Mesh(BurningBlock block) {
@@ -231,7 +264,8 @@ final class StructureFireClient {
             frame++;
             VISIBLE.clear();
             for (var mesh : MESHES.values()) {
-                if (mesh.block.quenched || now >= mesh.block.coolAt()) continue;
+                mesh.time = FireClocks.get(mc.level).time(mesh.block.pos, now);
+                if (mesh.block.quenched || mesh.time >= mesh.block.coolAt()) continue;
                 if (mesh.block.pos.distToCenterSqr(camera) > FireViewDistance.squared(mc)
                         || !event.getFrustum().isVisible(mesh.bounds)
                         || !mc.level
@@ -262,7 +296,7 @@ final class StructureFireClient {
                         if (face == null
                                 || !face.visible
                                 || mesh.block.fuel == StructureFuel.LEAVES) continue;
-                        if (mesh.block.quenched || now >= mesh.block.coolAt()) continue;
+                        if (mesh.block.quenched || mesh.time >= mesh.block.coolAt()) continue;
                         for (int v = 0; v < GRID; v++)
                             for (int u = 0; u < GRID; u++) {
                                 var a = face.corner(u, v);
@@ -270,12 +304,21 @@ final class StructureFireClient {
                                 var c = face.corner(u + 1, v + 1);
                                 var d = face.corner(u + 1, v);
                                 float alpha =
-                                        a.alpha(layer, now)
-                                                + b.alpha(layer, now)
-                                                + c.alpha(layer, now)
-                                                + d.alpha(layer, now);
+                                        a.alpha(layer, mesh.time)
+                                                + b.alpha(layer, mesh.time)
+                                                + c.alpha(layer, mesh.time)
+                                                + d.alpha(layer, mesh.time);
                                 if (alpha > .005f)
-                                    quad(vertices, face, u, v, 1, layer, now, camera, mesh.light);
+                                    quad(
+                                            vertices,
+                                            face,
+                                            u,
+                                            v,
+                                            1,
+                                            layer,
+                                            mesh.time,
+                                            camera,
+                                            mesh.light);
                             }
                     }
                 buffer.endBatch(layer.type);
@@ -291,8 +334,8 @@ final class StructureFireClient {
         Vec3 right = new Vec3(event.getCamera().getLeftVector()).scale(-1);
         Vec3 flatRight = new Vec3(right.x, 0, right.z).normalize();
         for (var mesh : VISIBLE) {
-            if (mesh.block.quenched || now >= mesh.block.lastIgnition + mesh.block.fuel.flameTicks)
-                continue;
+            if (mesh.block.quenched
+                    || mesh.time >= mesh.block.lastIgnition + mesh.block.fuel.flameTicks) continue;
             for (var face : mesh.faces) {
                 if (face == null || !face.visible) continue;
                 // One continuous plume for each 2x2 burn-cell group; char still resolves every
@@ -308,7 +351,7 @@ final class StructureFireClient {
                                                 + (v + dv) * GRID
                                                 + u
                                                 + du;
-                                float heat = intensity(mesh.block, index, now);
+                                float heat = intensity(mesh.block, index, mesh.time);
                                 if (heat > strength) {
                                     strength = heat;
                                     chosen = index;
@@ -351,14 +394,14 @@ final class StructureFireClient {
                                     a.block.pos.distToCenterSqr(camera)));
         Vec3 up = new Vec3(event.getCamera().getUpVector());
         for (var mesh : VISIBLE) {
-            if (mesh.block.quenched || now >= mesh.block.coolAt()) continue;
-            double age = (now - mesh.block.firstIgnition) / 20;
+            if (mesh.block.quenched || mesh.time >= mesh.block.coolAt()) continue;
+            double age = (mesh.time - mesh.block.firstIgnition) / 20;
             float seed = noise(mesh.block.pos.asLong());
             for (int i = 0; i < 3; i++) {
                 double cycle = (age * .16 + i / 3.0 + seed) % 1;
                 float alpha =
                         clamp(age / 2)
-                                * clamp((mesh.block.coolAt() - now) / 240)
+                                * clamp((mesh.block.coolAt() - mesh.time) / 240)
                                 * clamp(cycle * 5)
                                 * clamp((1 - cycle) * 3)
                                 * .22f;

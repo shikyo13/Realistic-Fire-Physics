@@ -2,8 +2,8 @@ package com.zerotheabsolute.surfacefire.client;
 
 import com.zerotheabsolute.surfacefire.SurfaceFire;
 import com.zerotheabsolute.surfacefire.audio.CombustionState;
+import com.zerotheabsolute.surfacefire.audio.FireSounds;
 import com.zerotheabsolute.surfacefire.client.audio.FireAudioStream;
-import com.zerotheabsolute.surfacefire.torch.TorchSounds;
 import com.zerotheabsolute.surfacefire.torch.TorchState;
 
 import net.minecraft.client.Minecraft;
@@ -80,7 +80,7 @@ public final class TorchAudio {
         private volatile CombustionState controls = CombustionState.SILENT;
 
         Loop(LocalPlayer owner) {
-            super(TorchSounds.BURN.get(), SoundSource.BLOCKS, RandomSource.create());
+            super(FireSounds.BURN.get(), SoundSource.BLOCKS, RandomSource.create());
             this.owner = owner;
             level = owner.level();
             looping = true;

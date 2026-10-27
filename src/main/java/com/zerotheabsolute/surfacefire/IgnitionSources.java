@@ -1,5 +1,7 @@
 package com.zerotheabsolute.surfacefire;
 
+import com.zerotheabsolute.surfacefire.simulation.FireClocks;
+
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.tags.FluidTags;
@@ -95,7 +97,11 @@ public final class IgnitionSources {
         int count = Math.min(SOURCE_BUDGET, queue.size());
         for (int i = 0; i < count; i++) {
             var pos = queue.removeFirst();
-            if (!level.hasChunkAt(pos) || !hot(level.getBlockState(pos))) {
+            if (!FireClocks.ticking(level, net.minecraft.world.level.ChunkPos.asLong(pos))) {
+                queue.addLast(pos);
+                continue;
+            }
+            if (!hot(level.getBlockState(pos))) {
                 KNOWN.get(level).remove(pos);
                 continue;
             }

@@ -1,6 +1,7 @@
 package com.zerotheabsolute.surfacefire.client.audio;
 
 import com.zerotheabsolute.surfacefire.audio.CombustionState;
+import com.zerotheabsolute.surfacefire.audio.FireSoundProfile;
 import com.zerotheabsolute.surfacefire.audio.FireSynthesizer;
 
 import net.minecraft.client.sounds.AudioStream;
@@ -25,8 +26,13 @@ public final class FireAudioStream implements AudioStream {
     private boolean closed;
 
     public FireAudioStream(Supplier<CombustionState> controls, long seed) {
+        this(controls, seed, FireSoundProfile.TORCH);
+    }
+
+    public FireAudioStream(
+            Supplier<CombustionState> controls, long seed, FireSoundProfile profile) {
         this.controls = controls;
-        synthesizer = new FireSynthesizer(seed);
+        synthesizer = new FireSynthesizer(seed, profile);
     }
 
     @Override

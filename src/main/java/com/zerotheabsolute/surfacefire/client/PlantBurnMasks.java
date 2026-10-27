@@ -1,6 +1,7 @@
 package com.zerotheabsolute.surfacefire.client;
 
 import com.zerotheabsolute.surfacefire.*;
+import com.zerotheabsolute.surfacefire.simulation.FireClocks;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
@@ -78,10 +79,11 @@ final class PlantBurnMasks {
     public static void tick(ClientTickEvent.Post event) {
         var level = Minecraft.getInstance().level;
         if (level == null || level.getGameTime() % UPDATE_TICKS != 0) return;
-        long now = level.getGameTime();
+        long worldTime = level.getGameTime();
         var iterator = CHANGING.iterator();
         while (iterator.hasNext()) {
             var ground = iterator.next();
+            long now = FireClocks.get(level).time(ground, worldTime);
             if (!level.getChunkSource().hasChunk(ground.getX() >> 4, ground.getZ() >> 4)) continue;
             var state = level.getBlockState(ground.above());
             if (!FuelRules.vegetation(state)) {

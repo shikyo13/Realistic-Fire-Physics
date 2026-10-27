@@ -1,6 +1,7 @@
 package com.zerotheabsolute.surfacefire.client;
 
 import com.zerotheabsolute.surfacefire.SurfaceFire;
+import com.zerotheabsolute.surfacefire.simulation.FireClocks;
 import com.zerotheabsolute.surfacefire.structure.BurningBlock;
 import com.zerotheabsolute.surfacefire.structure.SurfaceCell;
 
@@ -91,13 +92,14 @@ final class StructureBurnMasks {
             var iterator = CHANGING.values().iterator();
             while (iterator.hasNext()) {
                 var block = iterator.next();
+                long local = FireClocks.get(mc.level).time(block.pos, now);
                 float[] cover = new float[SurfaceCell.BLOCK_CELLS];
                 for (int i = 0; i < cover.length; i++)
                     if (block.ignition[i] != BurningBlock.UNBURNED)
                         cover[i] =
                                 (float)
                                         Math.clamp(
-                                                (now - block.ignition[i])
+                                                (local - block.ignition[i])
                                                         / (double) CHAR_FADE_TICKS,
                                                 0,
                                                 1);
@@ -113,7 +115,7 @@ final class StructureBurnMasks {
                     MASKS.put(block.pos, mask);
                     ScorchSections.changed(block.pos);
                 }
-                if (now >= block.lastIgnition + CHAR_FADE_TICKS) iterator.remove();
+                if (local >= block.lastIgnition + CHAR_FADE_TICKS) iterator.remove();
             }
         }
     }

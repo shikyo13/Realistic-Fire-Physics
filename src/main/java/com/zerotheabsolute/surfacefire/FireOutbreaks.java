@@ -111,6 +111,15 @@ public final class FireOutbreaks extends SavedData {
         return group.id;
     }
 
+    /** Keep a paused chunk's live outbreak allowance until its combustion resumes. */
+    public void retain(long owner, long until) {
+        var group = root(owner);
+        if (group != null && until > group.until) {
+            group.until = until;
+            setDirty();
+        }
+    }
+
     public void tick(long now) {
         if (lastMaintenance != Long.MIN_VALUE
                 && now >= lastMaintenance

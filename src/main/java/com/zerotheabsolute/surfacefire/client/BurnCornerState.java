@@ -3,6 +3,7 @@ package com.zerotheabsolute.surfacefire.client;
 import com.zerotheabsolute.surfacefire.FireField;
 import com.zerotheabsolute.surfacefire.FirePacket;
 import com.zerotheabsolute.surfacefire.FireSettings;
+import com.zerotheabsolute.surfacefire.simulation.FireClocks;
 
 /** Exact linear segments keep continuous burn animation without revisiting settled samples. */
 final class BurnCornerState {
@@ -17,6 +18,7 @@ final class BurnCornerState {
     private final FirePacket.Sample[] samples;
     private final double[] start = new double[4], slope = new double[4];
     private long epoch = Long.MIN_VALUE, nextChange = Long.MIN_VALUE;
+    private long clockRevision = Long.MIN_VALUE;
     float cover, heat, ember, dry;
 
     BurnCornerState(FirePacket.Sample[] samples) {
@@ -43,7 +45,15 @@ final class BurnCornerState {
     }
 
     void update(double now) {
-        if (now < epoch || now >= nextChange) prepare((long) Math.floor(now));
+        update(now, null);
+    }
+
+    void update(double now, FireClocks clocks) {
+        long revision = clocks == null ? 0 : clocks.revision();
+        if (now < epoch || now >= nextChange || revision != clockRevision) {
+            prepare((long) Math.floor(now), clocks);
+            clockRevision = revision;
+        }
         double elapsed = now - epoch;
         cover = value(COVER, elapsed);
         heat = value(HEAT, elapsed);
@@ -55,14 +65,21 @@ final class BurnCornerState {
         return (float) (start[channel] + slope[channel] * elapsed);
     }
 
-    private void prepare(long now) {
+    private void prepare(long now, FireClocks clocks) {
         epoch = now;
         nextChange = Long.MAX_VALUE;
         java.util.Arrays.fill(start, 0);
         java.util.Arrays.fill(slope, 0);
         for (var sample : samples) {
             if (sample == null) continue;
-            double age = now - sample.ignition();
+            var clock =
+                    clocks == null
+                            ? null
+                            : clocks.clock(
+                                    net.minecraft.world.level.ChunkPos.asLong(sample.block()));
+            long local = clock == null ? now : clock.time(now);
+            boolean running = clock == null || !clock.paused();
+            double age = local - sample.ignition();
             int[] boundaries =
                     sample.fuel() == 3
                             ? DRY_BOUNDARIES
@@ -73,30 +90,33 @@ final class BurnCornerState {
                                             : GROUND_BOUNDARIES;
             for (int boundary : boundaries) {
                 long change = sample.ignition() + boundary;
-                if (change > now) nextChange = Math.min(nextChange, change);
+                if (running && change > local)
+                    nextChange = Math.min(nextChange, now + change - local);
             }
             if (sample.fuel() == 3) {
-                ramp(DRY, age, FireSettings.TORCH_DRY_TICKS);
+                ramp(DRY, age, FireSettings.TORCH_DRY_TICKS, running);
                 continue;
             }
-            ramp(COVER, age, SCORCH_TICKS);
+            ramp(COVER, age, SCORCH_TICKS, running);
             if (sample.quenched()) continue;
             int lifetime = FireField.lifetime(sample.fuel());
             int fade = fadeTicks(sample.fuel());
             start[HEAT] +=
                     clamp(age / HEAT_RISE_TICKS) * clamp((lifetime - age) / fade) * CORNER_WEIGHT;
-            if (age >= 0 && age < HEAT_RISE_TICKS) slope[HEAT] += CORNER_WEIGHT / HEAT_RISE_TICKS;
-            else if (age >= lifetime - fade && age < lifetime) slope[HEAT] -= CORNER_WEIGHT / fade;
+            if (running && age >= 0 && age < HEAT_RISE_TICKS)
+                slope[HEAT] += CORNER_WEIGHT / HEAT_RISE_TICKS;
+            else if (running && age >= lifetime - fade && age < lifetime)
+                slope[HEAT] -= CORNER_WEIGHT / fade;
             double cooling = age - lifetime;
             start[EMBER] += clamp(1 - cooling / FireSettings.SMOLDER_TICKS) * CORNER_WEIGHT;
-            if (cooling >= 0 && cooling < FireSettings.SMOLDER_TICKS)
+            if (running && cooling >= 0 && cooling < FireSettings.SMOLDER_TICKS)
                 slope[EMBER] -= CORNER_WEIGHT / FireSettings.SMOLDER_TICKS;
         }
     }
 
-    private void ramp(int channel, double age, int duration) {
+    private void ramp(int channel, double age, int duration, boolean running) {
         start[channel] += clamp(age / duration) * CORNER_WEIGHT;
-        if (age >= 0 && age < duration) slope[channel] += CORNER_WEIGHT / duration;
+        if (running && age >= 0 && age < duration) slope[channel] += CORNER_WEIGHT / duration;
     }
 
     private static double clamp(double value) {

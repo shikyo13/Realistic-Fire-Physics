@@ -5,12 +5,9 @@ package com.zerotheabsolute.surfacefire.audio;
  */
 public final class FireSynthesizer {
     public static final int SAMPLE_RATE = SpectralExtension.SAMPLE_RATE;
-    private static final double PRESSURE_GAIN = .055;
     private static final double OUTPUT_HEADROOM = .85;
-    private static final double CRACKLE_GAIN = .9;
-    private static final double SOFTENING_MIX = .12;
-    private static final double SOFTENING_RESPONSE =
-            1 - Math.exp(-2 * Math.PI * 3500 / SAMPLE_RATE);
+    private final FireSoundProfile profile;
+    private final double softeningResponse;
     private final CombustionFlux flux;
     private final FluxPressure pressure;
     private final SpectralExtension extension;
@@ -23,6 +20,12 @@ public final class FireSynthesizer {
     private int cursor = SpectralExtension.HOP;
 
     public FireSynthesizer(long seed) {
+        this(seed, FireSoundProfile.TORCH);
+    }
+
+    public FireSynthesizer(long seed, FireSoundProfile profile) {
+        this.profile = profile;
+        softeningResponse = 1 - Math.exp(-2 * Math.PI * profile.softeningFrequency / SAMPLE_RATE);
         flux = new CombustionFlux(seed);
         pressure = new FluxPressure(flux::next, CombustionFlux.STEPS_PER_SECOND, SAMPLE_RATE);
         extension = new SpectralExtension(seed ^ 0x9e3779b97f4a7c15L);
@@ -43,9 +46,11 @@ public final class FireSynthesizer {
                 extension.process(low, extended);
                 cursor = 0;
             }
-            double value = extended[cursor++] * PRESSURE_GAIN + crackle.next(state) * CRACKLE_GAIN;
-            softened += (value - softened) * SOFTENING_RESPONSE;
-            value += SOFTENING_MIX * (softened - value);
+            double value =
+                    extended[cursor++] * profile.pressureGain
+                            + crackle.next(state) * profile.crackleGain;
+            softened += (value - softened) * softeningResponse;
+            value += profile.softeningMix * (softened - value);
             value *= flutter.next(state.airflow());
             output[i] = (float) (OUTPUT_HEADROOM * value / (1 + Math.abs(value)));
         }

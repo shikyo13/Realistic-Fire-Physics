@@ -3,6 +3,7 @@ package com.zerotheabsolute.surfacefire.client;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.*;
 import com.zerotheabsolute.surfacefire.*;
+import com.zerotheabsolute.surfacefire.simulation.FireClocks;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.*;
@@ -121,7 +122,9 @@ public final class FireClient {
         if (receivingLevel != null) {
             var lighting = FireLighting.get(receivingLevel);
             if (p.reset()) lighting.clear();
-            for (var sample : p.samples()) lighting.accept(sample, p.clock());
+            for (var sample : p.samples())
+                lighting.accept(
+                        sample, FireClocks.get(receivingLevel).time(sample.block(), p.clock()));
         }
         boolean reset = p.reset() || !dimension.equals(p.dimension());
         if (reset) {
@@ -152,8 +155,8 @@ public final class FireClient {
             GroundBurnMasks.changed(s);
             if (!s.quenched()
                     && s.fuel() != 3
-                    && p.clock() - s.ignition() < FireField.lifetime(s.fuel()))
-                FLAME_SITES.put(s.site(), s);
+                    && FireClocks.get(level).time(s.block(), p.clock()) - s.ignition()
+                            < FireField.lifetime(s.fuel())) FLAME_SITES.put(s.site(), s);
             else FLAME_SITES.remove(s.site());
             if ((s.site().x() & 7) == 3 && (s.site().z() & 7) == 3) SMOKE_SITES.put(s.site(), s);
             addMesh(s.site());
@@ -240,6 +243,7 @@ public final class FireClient {
 
     @SubscribeEvent
     public static void logout(ClientPlayerNetworkEvent.LoggingOut e) {
+        FireClocks.clearClient();
         SAMPLES.clear();
         MESH.clear();
         CORNERS.clear();
@@ -274,6 +278,30 @@ public final class FireClient {
                 * clamp((FireField.lifetime(s.fuel()) - age) / (s.fuel() == 2 ? 40.0 : 12.0));
     }
 
+    static void collectActivity(FireActivity activity) {
+        var level = Minecraft.getInstance().level;
+        if (level == null || !dimension.equals(level.dimension().location().toString())) return;
+        double worldTime = level.getGameTime() + serverOffset;
+        var clocks = FireClocks.get(level);
+        var iterator = FLAME_SITES.values().iterator();
+        while (iterator.hasNext()) {
+            var sample = iterator.next();
+            double now = clocks.time(sample.block(), worldTime);
+            if (now - sample.ignition() >= FireField.lifetime(sample.fuel())) {
+                iterator.remove();
+                continue;
+            }
+            var site = sample.site();
+            if (!level.getChunkSource().hasChunk(site.x() >> 7, site.z() >> 7)) continue;
+            activity.add(
+                    (site.x() + .5) / 8,
+                    site.y() + 1,
+                    (site.z() + .5) / 8,
+                    heat(sample, now) * (sample.fuel() == 2 ? 2f : 1f) / 64,
+                    .15f);
+        }
+    }
+
     private record GroundQuad(Corner a, Corner b, Corner c, Corner d) {}
 
     private static final class Tile {
@@ -285,7 +313,7 @@ public final class FireClient {
         long coverageSettlesAt;
         boolean visible;
         int light;
-        double distance;
+        double distance, time;
         final FlameMotion motion = new FlameMotion();
         long effectsUntil, flameUntil;
         boolean drying;
@@ -333,7 +361,7 @@ public final class FireClient {
         }
 
         void settleCoverage(double now) {
-            if (coverageChecked || now < coverageSettlesAt) return;
+            if (coverageChecked || time < coverageSettlesAt) return;
             coverageChecked = true;
             fullCoverage = quads.size() == 64;
             if (!fullCoverage) return;
@@ -384,7 +412,7 @@ public final class FireClient {
         void update(double now) {
             if (updated == frame) return;
             updated = frame;
-            burn.update(now);
+            burn.update(now, FireClocks.get(Minecraft.getInstance().level));
             cover = burn.cover;
             hot = burn.heat;
             ember = burn.ember;
@@ -418,7 +446,7 @@ public final class FireClient {
             if (!layer.isEmissive()) continue;
             var vertices = BUFFER.getBuffer(layer.type);
             for (var tile : TILES.values()) {
-                if (!tile.visible || !tile.hasLayer(layer, now)) continue;
+                if (!tile.visible || !tile.hasLayer(layer, tile.time)) continue;
                 if (layer == ShaderPackRendering.GroundLayer.EMBER
                         && tile.distance > DETAILED_EMBER_DISTANCE_SQUARED) {
                     tile.settleCoverage(now);
@@ -431,11 +459,6 @@ public final class FireClient {
                     var quad = tile.quads.get(quadIndex);
                     if (layer == ShaderPackRendering.GroundLayer.EMBER
                             && !EmberCoverage.contains(quad.a.x, quad.a.z)) continue;
-                    if (groundAlpha(quad.a, layer, now)
-                                    + groundAlpha(quad.b, layer, now)
-                                    + groundAlpha(quad.c, layer, now)
-                                    + groundAlpha(quad.d, layer, now)
-                            < .005f) continue;
                     drawGroundQuad(vertices, quad, layer, now, tile.light);
                 }
             }
@@ -449,22 +472,17 @@ public final class FireClient {
             ShaderPackRendering.GroundLayer layer,
             double now,
             int light) {
-        drawGroundCorner(vertices, quad.a, layer, now, light);
-        drawGroundCorner(vertices, quad.b, layer, now, light);
-        drawGroundCorner(vertices, quad.c, layer, now, light);
-        drawGroundCorner(vertices, quad.d, layer, now, light);
+        float a = quad.a.alpha(layer, now), b = quad.b.alpha(layer, now);
+        float c = quad.c.alpha(layer, now), d = quad.d.alpha(layer, now);
+        if (a + b + c + d < .005f) return;
+        int packedLight = layer.isEmissive() ? LightTexture.FULL_BRIGHT : light;
+        drawGroundCorner(vertices, quad.a, a, packedLight);
+        drawGroundCorner(vertices, quad.b, b, packedLight);
+        drawGroundCorner(vertices, quad.c, c, packedLight);
+        drawGroundCorner(vertices, quad.d, d, packedLight);
     }
 
-    private static float groundAlpha(Corner c, ShaderPackRendering.GroundLayer layer, double now) {
-        return c.alpha(layer, now);
-    }
-
-    private static void drawGroundCorner(
-            VertexConsumer v,
-            Corner c,
-            ShaderPackRendering.GroundLayer layer,
-            double now,
-            int light) {
+    private static void drawGroundCorner(VertexConsumer v, Corner c, float alpha, int light) {
         ShaderPackRendering.groundVertex(
                 v,
                 (float) (c.x - cameraX),
@@ -472,8 +490,8 @@ public final class FireClient {
                 (float) (c.z - cameraZ),
                 c.x,
                 c.z,
-                groundAlpha(c, layer, now),
-                layer.isEmissive() ? LightTexture.FULL_BRIGHT : light);
+                alpha,
+                light);
     }
 
     private static void billboard(
@@ -553,17 +571,18 @@ public final class FireClient {
             var ground = textured ? null : BUFFER.getBuffer(groundType);
             if (!glowPass)
                 for (var tile : TILES.values()) {
+                    tile.time = FireClocks.get(mc.level).time(tile.pos, now);
                     tile.distance = tile.pos.distSqr(mc.player.blockPosition());
                     tile.visible =
                             tile.distance <= FireViewDistance.squared(mc)
                                     && e.getFrustum().isVisible(tile.bounds)
                                     && FireField.fuel(mc.level, tile.pos) > 0;
-                    if (tile.visible && now < tile.flameUntil)
+                    if (tile.visible && tile.time < tile.flameUntil)
                         tile.motion.update(
                                 now / 20, tile.pos.getX(), tile.pos.getY(), tile.pos.getZ());
                     if (tile.visible && textured)
                         tile.light = LevelRenderer.getLightColor(mc.level, tile.pos.above());
-                    if (!tile.visible || textured || now >= tile.effectsUntil) continue;
+                    if (!tile.visible || textured || tile.time >= tile.effectsUntil) continue;
                     for (var q : tile.quads) {
                         q.a.draw(ground, now);
                         q.b.draw(ground, now);
@@ -575,18 +594,21 @@ public final class FireClient {
             else if (!textured) BUFFER.endBatch(groundType);
             Vec3 right = new Vec3(e.getCamera().getLeftVector()).scale(-1);
             Vec3 flatRight = new Vec3(right.x, 0, right.z).normalize();
+            Vec3 crossRight = new Vec3(flatRight.z, 0, -flatRight.x);
             var flames = BUFFER.getBuffer(flameType);
             var activeFlames = FLAME_SITES.values().iterator();
             while (activeFlames.hasNext()) {
                 var s = activeFlames.next();
-                if (now - s.ignition() >= FireField.lifetime(s.fuel())) {
+                var tile = TILES.get(s.block());
+                double burnTime =
+                        tile == null ? FireClocks.get(mc.level).time(s.block(), now) : tile.time;
+                if (burnTime - s.ignition() >= FireField.lifetime(s.fuel())) {
                     activeFlames.remove();
                     continue;
                 }
                 var site = s.site();
-                float heat = heat(s, now);
+                float heat = heat(s, burnTime);
                 if (heat < .01) continue;
-                var tile = TILES.get(s.block());
                 if ((s.fuel() == 2 && ((site.x() & 1) != 0 || (site.z() & 1) != 0))
                         || tile == null
                         || !tile.visible
@@ -594,12 +616,15 @@ public final class FireClient {
                 float seed = noise(site.x(), site.z());
                 double x = (site.x() + seed) / 8.0,
                         z = (site.z() + noise(site.z() + 13, site.x())) / 8.0;
-                double tall = s.fuel() == 2 ? .45 + seed * 1.1 : .055 + Math.pow(seed, 2.8) * .36;
+                double tall =
+                        s.fuel() == 2
+                                ? tile.motion.vegetationHeight(seed)
+                                : .055 + Math.pow(seed, 2.8) * .36;
                 double height = tall * tile.motion.height(seed, heat) * (.4 + .6 * heat);
                 float brightness = heat * tile.motion.brightness(seed);
                 double width =
                         s.fuel() == 2
-                                ? .20 + .23 * seed
+                                ? tile.motion.vegetationWidth(seed)
                                 : .12 + .10 * noise(site.x() + 73, site.z());
                 billboard(
                         flames,
@@ -620,9 +645,9 @@ public final class FireClient {
                             x + .04,
                             site.y() + 1.014,
                             z - .03,
-                            .24,
-                            height * 1.35,
-                            new Vec3(flatRight.z, 0, -flatRight.x),
+                            width,
+                            height * .8,
+                            crossRight,
                             tile.motion.up(),
                             1 - seed,
                             brightness * .65f,
@@ -641,12 +666,13 @@ public final class FireClient {
             var smokeIterator = SMOKE_SITES.values().iterator();
             while (smokeIterator.hasNext()) {
                 var s = smokeIterator.next();
-                if (s.quenched() || s.fuel() == 3 || now - s.ignition() >= 520) {
+                double burnTime = FireClocks.get(mc.level).time(s.block(), now);
+                if (s.quenched() || s.fuel() == 3 || burnTime - s.ignition() >= 520) {
                     smokeIterator.remove();
                     continue;
                 }
                 var tile = TILES.get(s.block());
-                if (now - s.ignition() >= 10
+                if (burnTime - s.ignition() >= 10
                         && tile != null
                         && tile.visible
                         && tile.distance <= 48 * 48) VISIBLE_SMOKE.add(s);
@@ -655,7 +681,7 @@ public final class FireClient {
             if (!textured)
                 VISIBLE_SMOKE.sort(Comparator.comparingDouble(s -> -smokeDistance(s, camera)));
             for (var s : VISIBLE_SMOKE) {
-                double age = (now - s.ignition()) / 20.0;
+                double age = (FireClocks.get(mc.level).time(s.block(), now) - s.ignition()) / 20.0;
                 var tile = TILES.get(s.block());
                 if (tile == null || !tile.visible || tile.distance > FireViewDistance.squared(mc))
                     continue;

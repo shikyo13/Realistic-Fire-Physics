@@ -2,6 +2,7 @@ package com.zerotheabsolute.surfacefire;
 
 import com.zerotheabsolute.surfacefire.lighting.FireEmission;
 import com.zerotheabsolute.surfacefire.lighting.LightCluster;
+import com.zerotheabsolute.surfacefire.simulation.FireClocks;
 
 import it.unimi.dsi.fastutil.longs.Long2ByteMap;
 import it.unimi.dsi.fastutil.longs.Long2ByteMaps;
@@ -108,16 +109,18 @@ public final class FireLighting {
         long now = level.getGameTime();
         if (now % UPDATE_INTERVAL_TICKS != 0) return;
         invalidation.tick(level);
+        var clocks = FireClocks.get(level);
         for (var cluster : clusters.values()) cluster.reset();
         var iterator = heat.long2ObjectEntrySet().fastIterator();
         while (iterator.hasNext()) {
             var entry = iterator.next();
             var patch = entry.getValue();
-            if (patch.expires <= now) {
+            var ground = BlockPos.of(entry.getLongKey());
+            long local = clocks.time(ground, now);
+            if (patch.expires <= local) {
                 iterator.remove();
                 continue;
             }
-            var ground = BlockPos.of(entry.getLongKey());
             if (!level.getChunkSource().hasChunk(ground.getX() >> 4, ground.getZ() >> 4)) continue;
             var position = ground.above();
             if (!level.getFluidState(position).isEmpty() || level.isRainingAt(position)) continue;
@@ -128,15 +131,15 @@ public final class FireLighting {
                             Math.floorDiv(ground.getZ(), LIGHT_GROUP_WIDTH));
             var cluster = clusters.computeIfAbsent(group, key -> new LightCluster());
             for (int cell = 0; cell < 64; cell++) {
-                if (patch.coolUntil[cell] <= now) continue;
+                if (patch.coolUntil[cell] <= local) continue;
                 int light =
-                        FireEmission.strength(patch.flameUntil[cell], patch.coolUntil[cell], now);
+                        FireEmission.strength(patch.flameUntil[cell], patch.coolUntil[cell], local);
                 cluster.add(
                         ground.getX() + ((cell & 7) + .5) / 8,
                         ground.getY() + 1.1,
                         ground.getZ() + ((cell >> 3) + .5) / 8,
                         light,
-                        now < patch.flameUntil[cell]);
+                        local < patch.flameUntil[cell]);
             }
         }
         var desired = new Long2ByteOpenHashMap(clusters.size() * 8 + movingLights.size());
@@ -158,12 +161,13 @@ public final class FireLighting {
         var structureIterator = structures.values().iterator();
         while (structureIterator.hasNext()) {
             var block = structureIterator.next();
-            if (block.quenched || now >= block.coolAt()) {
+            long local = clocks.time(block.pos, now);
+            if (block.quenched || local >= block.coolAt()) {
                 structureIterator.remove();
                 continue;
             }
             if (level.getChunkSource().hasChunk(block.pos.getX() >> 4, block.pos.getZ() >> 4))
-                block.emitLight(now, desired, visibility);
+                block.emitLight(local, desired, visibility);
         }
         for (var entry : movingLights.long2ByteEntrySet()) {
             if (entry.getByteValue() > desired.get(entry.getLongKey()))

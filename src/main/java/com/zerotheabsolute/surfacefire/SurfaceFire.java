@@ -1,5 +1,7 @@
 package com.zerotheabsolute.surfacefire;
 
+import com.zerotheabsolute.surfacefire.simulation.FireClockPacket;
+import com.zerotheabsolute.surfacefire.simulation.FireClocks;
 import com.zerotheabsolute.surfacefire.structure.StructureField;
 import com.zerotheabsolute.surfacefire.structure.StructureFuel;
 import com.zerotheabsolute.surfacefire.structure.StructurePacket;
@@ -28,8 +30,9 @@ public final class SurfaceFire {
     public SurfaceFire(IEventBus modBus, net.neoforged.fml.ModContainer container) {
         container.registerConfig(net.neoforged.fml.config.ModConfig.Type.SERVER, FireSettings.SPEC);
         com.zerotheabsolute.surfacefire.torch.TorchBlocks.BLOCKS.register(modBus);
-        com.zerotheabsolute.surfacefire.torch.TorchSounds.SOUNDS.register(modBus);
+        com.zerotheabsolute.surfacefire.audio.FireSounds.SOUNDS.register(modBus);
         modBus.addListener(FirePacket::register);
+        modBus.addListener(FireClockPacket::register);
         modBus.addListener(StructurePacket::register);
         NeoForge.EVENT_BUS.addListener(SurfaceFire::ignite);
         NeoForge.EVENT_BUS.addListener(SurfaceFire::tick);
@@ -85,6 +88,7 @@ public final class SurfaceFire {
 
     private static void tick(LevelTickEvent.Post e) {
         if (e.getLevel() instanceof ServerLevel level) {
+            FireClocks.get(level).tick(level);
             FireField.get(level).tick(level);
             StructureField.get(level).tick(level);
             IgnitionSources.tick(level);
@@ -96,6 +100,9 @@ public final class SurfaceFire {
 
     private static void login(PlayerEvent.PlayerLoggedInEvent e) {
         if (e.getEntity() instanceof ServerPlayer p) {
+            FireField.get(p.serverLevel());
+            StructureField.get(p.serverLevel());
+            FireClocks.get(p.serverLevel()).sendSnapshot(p);
             FireField.get(p.serverLevel()).sendSnapshot(p);
             StructureField.get(p.serverLevel()).sendSnapshot(p);
         }
@@ -103,6 +110,9 @@ public final class SurfaceFire {
 
     private static void dimension(PlayerEvent.PlayerChangedDimensionEvent e) {
         if (e.getEntity() instanceof ServerPlayer p) {
+            FireField.get(p.serverLevel());
+            StructureField.get(p.serverLevel());
+            FireClocks.get(p.serverLevel()).sendSnapshot(p);
             FireField.get(p.serverLevel()).sendSnapshot(p);
             StructureField.get(p.serverLevel()).sendSnapshot(p);
         }

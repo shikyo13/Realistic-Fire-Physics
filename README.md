@@ -8,6 +8,7 @@ A fire overhaul for Minecraft Java 1.21.1 with spreading flames, glowing embers,
 - Burning surfaces glow and char. Ground continues to smolder after the flames subside, then cools. Burn marks persist when the world is saved and reopened.
 - Jump onto burning ground to stamp out small patches. Partially burned grass and ferns retain their scorched appearance.
 - Flames bend with local gusts, and held or dropped torch flames trail their movement. Torch sound responds to airflow, with gentle crackling at rest and stronger flutter in motion.
+- Larger fires move in rolling groups of flames and produce a fuller roar as nearby vegetation and wood burn.
 - A dropped torch gradually dries and ignites the grass beneath it. Picking it up or wetting the ground interrupts ignition.
 - Water and rain extinguish fire and torches. Placed torches can be relit with flint and steel.
 - Candles and candle cakes use animated flames at each wick.
@@ -20,6 +21,8 @@ Install the mod in a Minecraft 1.21.1 instance running Java 21 and NeoForge 21.1
 Use flint and steel or a fire charge on grass, moss, podzol, mycelium, or a flammable structure. Ground fire follows connected, exposed fuel at the same elevation. Fire on structures follows individual faces and spreads between adjacent wood and leaf blocks. Active fire and smoldering ground damage living entities; cooled char is safe.
 
 Ignition requires the `doFireTick` game rule to be enabled.
+
+Fire follows Minecraft's chunk ticking rules. Combustion pauses outside the ticking area and resumes when that area becomes active again, including after saving and reopening the world. Visible flames keep animating while paused. Chunks kept active by another player or a chunk-loading mechanism continue burning normally.
 
 ## Configuration
 
