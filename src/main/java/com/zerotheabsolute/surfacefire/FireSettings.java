@@ -45,6 +45,9 @@ public final class FireSettings {
     public static final ModConfigSpec.IntValue RETAINED_GROUND_LIMIT;
     public static final ModConfigSpec.IntValue RETAINED_STRUCTURE_LIMIT;
     public static final ModConfigSpec.IntValue HISTORY_CLEANUP_WORK;
+    public static final ModConfigSpec.BooleanValue FALLING_LOGS;
+    public static final ModConfigSpec.IntValue MAX_FALLING_BODIES;
+    public static final ModConfigSpec.IntValue MAX_FALLING_LOGS;
 
     static {
         var builder = new ModConfigSpec.Builder();
@@ -94,6 +97,19 @@ public final class FireSettings {
                                 "Maximum history records examined per simulation tick when cleanup"
                                         + " is enabled.")
                         .defineInRange("historyCleanupWorkPerTick", 128, 16, 2048);
+        FALLING_LOGS =
+                builder.comment("Burned-through logs release unsupported trunks and branches.")
+                        .define("fallingLogs", true);
+        MAX_FALLING_BODIES =
+                builder.comment(
+                                "Maximum moving log groups per dimension. Further support checks"
+                                    + " wait for capacity.")
+                        .defineInRange("maxFallingTimberBodies", 24, 1, 64);
+        MAX_FALLING_LOGS =
+                builder.comment(
+                                "Maximum logs in one connected falling group. Larger structures"
+                                    + " remain static.")
+                        .defineInRange("maxLogsPerFallingBody", 64, 1, 256);
         SPEC = builder.build();
     }
 

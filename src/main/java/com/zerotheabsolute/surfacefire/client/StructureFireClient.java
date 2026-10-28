@@ -30,6 +30,8 @@ import java.util.List;
 final class StructureFireClient {
     private static final int GRID = SurfaceCell.WIDTH, CORNER_WIDTH = GRID + 1;
     private static final double SURFACE_OFFSET = .012;
+    private static final int PLUME_WIDTH = 4;
+    private static final double PLUME_JITTER = .13;
     private static final Vec3 UP = new Vec3(0, 1, 0);
     private static final Direction[] FACES = Direction.values();
     private static final ShaderPackRendering.GroundLayer[] LAYERS = {
@@ -171,10 +173,11 @@ final class StructureFireClient {
                 int global = direction.get3DDataValue() * SurfaceCell.FACE_CELLS + index;
                 float seed = noise(block.pos.asLong() + global * 73428767L);
                 seeds[index] = seed;
-                double u = (index % GRID + 1.0) / GRID + .23 * (seed - .5);
+                double u = (index % GRID + PLUME_WIDTH * .5) / GRID + PLUME_JITTER * (seed - .5);
                 double v =
-                        (index / GRID + 1.0) / GRID
-                                + .23 * (noise(global * 912931L + block.pos.asLong()) - .5);
+                        (index / GRID + PLUME_WIDTH * .5) / GRID
+                                + PLUME_JITTER
+                                        * (noise(global * 912931L + block.pos.asLong()) - .5);
                 anchors[index] =
                         new SurfaceCell(block.pos, direction, 0, 0)
                                 .point(Math.clamp(u, .02, .98), Math.clamp(v, .02, .98))
@@ -338,13 +341,13 @@ final class StructureFireClient {
                     || mesh.time >= mesh.block.lastIgnition + mesh.block.fuel.flameTicks) continue;
             for (var face : mesh.faces) {
                 if (face == null || !face.visible) continue;
-                // One continuous plume for each 2x2 burn-cell group; char still resolves every
-                // cell.
-                for (int v = 0; v < GRID; v += 2)
-                    for (int u = 0; u < GRID; u += 2) {
+                // Overlapping plumes share the face's motion; char retains the full cell grid.
+                for (int v = 0; v < GRID; v += PLUME_WIDTH)
+                    for (int u = 0; u < GRID; u += PLUME_WIDTH) {
                         float strength = 0;
-                        for (int dv = 0; dv < 2; dv++)
-                            for (int du = 0; du < 2; du++) {
+                        float coverage = 0;
+                        for (int dv = 0; dv < PLUME_WIDTH; dv++)
+                            for (int du = 0; du < PLUME_WIDTH; du++) {
                                 int index =
                                         face.direction.get3DDataValue() * SurfaceCell.FACE_CELLS
                                                 + (v + dv) * GRID
@@ -352,30 +355,27 @@ final class StructureFireClient {
                                                 + du;
                                 float heat = intensity(mesh.block, index, mesh.time);
                                 strength = Math.max(strength, heat);
+                                coverage += heat;
                             }
                         if (strength < .01f) continue;
+                        float fullness = (float) Math.sqrt(coverage / (PLUME_WIDTH * PLUME_WIDTH));
                         // Keep the group's shape and root stable as its hottest cell changes.
                         int local = v * GRID + u;
                         float seed = face.seeds[local];
                         var point = face.anchors[local];
                         double height =
-                                (mesh.block.fuel == StructureFuel.LEAVES ? .50 : .44)
+                                (mesh.block.fuel == StructureFuel.LEAVES ? .82 : .78)
+                                        * (.55 + .45 * fullness)
                                         * mesh.motion.height(seed, strength);
-                        FlameGeometry.billboard(
-                                vertices,
-                                camera,
-                                textured,
+                        JoinedFlames.WORLD.add(
                                 point.x,
-                                point.y - .035,
+                                point.y - .16,
                                 point.z,
-                                .22 + seed * .16,
+                                (.46 + seed * .16) * (.55 + .45 * fullness),
                                 height,
-                                flatRight,
                                 mesh.motion.up(),
                                 seed,
-                                strength * mesh.motion.brightness(seed),
-                                false,
-                                LightTexture.FULL_BRIGHT);
+                                strength * mesh.motion.brightness(seed));
                     }
             }
         }

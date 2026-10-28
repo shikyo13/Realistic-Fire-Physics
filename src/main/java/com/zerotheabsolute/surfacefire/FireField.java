@@ -576,7 +576,9 @@ public final class FireField extends SavedData {
                 + "] "
                 + com.zerotheabsolute.surfacefire.structure.StructureField.get(level).status()
                 + " "
-                + FireOutbreaks.get(level).status();
+                + FireOutbreaks.get(level).status()
+                + " "
+                + com.zerotheabsolute.surfacefire.physics.TimberCollapse.get(level).status();
     }
 
     public int clear(ServerLevel level) {
@@ -598,6 +600,7 @@ public final class FireField extends SavedData {
         for (var player : level.players()) sendSnapshot(player);
         com.zerotheabsolute.surfacefire.structure.StructureField.get(level).clear(level);
         FireOutbreaks.get(level).clear();
+        com.zerotheabsolute.surfacefire.physics.TimberCollapse.get(level).clear();
         clocks.clear(level);
         return n;
     }

@@ -27,15 +27,12 @@ public final class FireClient {
     private static final Map<FireField.Site, FirePacket.Sample> SMOKE_SITES = new HashMap<>();
     private static final Map<FireField.Site, FirePacket.Sample> FLAME_SITES = new HashMap<>();
     private static final List<FirePacket.Sample> VISIBLE_SMOKE = new ArrayList<>();
+    private static final List<Tile> VISIBLE_PLUMES = new ArrayList<>();
     private static final ShaderPackRendering.GroundLayer[] GROUND_LAYERS =
             ShaderPackRendering.GroundLayer.values();
     private static final Vec3 UP = new Vec3(0, 1, 0);
     private static final double DETAILED_EMBER_DISTANCE_SQUARED = 16 * 16;
     private static final int CHAR_SETTLE_TICKS = 8;
-    private static final double VEGETATION_POSITION_JITTER = .24;
-    private static final double GROUND_POSITION_JITTER = .10;
-    private static final double CROSS_FLAME_WIDTH = .65;
-    private static final double CROSS_FLAME_HEIGHT = .8;
     private static double cameraX, cameraY, cameraZ;
     private static Vec3 cameraPosition = Vec3.ZERO;
     private static long frame;
@@ -255,6 +252,8 @@ public final class FireClient {
         SMOKE_SITES.clear();
         FLAME_SITES.clear();
         VISIBLE_SMOKE.clear();
+        VISIBLE_PLUMES.clear();
+        JoinedFlames.WORLD.clear();
         dimension = "";
         TorchFlameRenderer.clear();
         CandleFlameRenderer.clear();
@@ -319,6 +318,7 @@ public final class FireClient {
         int light;
         double distance, time;
         final FlameMotion motion = new FlameMotion();
+        final GroundPlumes plumes = new GroundPlumes();
         long effectsUntil, flameUntil;
         boolean drying;
 
@@ -598,79 +598,78 @@ public final class FireClient {
             else if (!textured) BUFFER.endBatch(groundType);
             Vec3 right = new Vec3(e.getCamera().getLeftVector()).scale(-1);
             Vec3 flatRight = new Vec3(right.x, 0, right.z).normalize();
-            Vec3 crossRight = new Vec3(flatRight.z, 0, -flatRight.x);
+            JoinedFlames.WORLD.clear();
+            for (var tile : VISIBLE_PLUMES) tile.plumes.clear();
+            VISIBLE_PLUMES.clear();
             var flames = BUFFER.getBuffer(flameType);
             var activeFlames = FLAME_SITES.values().iterator();
             while (activeFlames.hasNext()) {
-                var s = activeFlames.next();
-                var tile = TILES.get(s.block());
+                var sample = activeFlames.next();
+                var tile = TILES.get(sample.block());
                 double burnTime =
-                        tile == null ? FireClocks.get(mc.level).time(s.block(), now) : tile.time;
-                if (burnTime - s.ignition() >= FireField.lifetime(s.fuel())) {
+                        tile == null
+                                ? FireClocks.get(mc.level).time(sample.block(), now)
+                                : tile.time;
+                double age = burnTime - sample.ignition();
+                if (age >= FireField.lifetime(sample.fuel())) {
                     activeFlames.remove();
                     continue;
                 }
-                var site = s.site();
-                float heat = heat(s, burnTime);
-                if (heat < .01) continue;
-                if ((s.fuel() == 2 && ((site.x() & 1) != 0 || (site.z() & 1) != 0))
-                        || tile == null
-                        || !tile.visible
-                        || tile.distance > FireViewDistance.squared(mc)) continue;
-                float seed = noise(site.x(), site.z());
-                boolean vegetation = s.fuel() == 2;
-                double jitter = vegetation ? VEGETATION_POSITION_JITTER : GROUND_POSITION_JITTER;
-                double x = (site.x() + .5) / 8.0 + (seed - .5) * jitter,
-                        z = (site.z() + .5) / 8.0 + (noise(site.z() + 13, site.x()) - .5) * jitter;
-                double envelope =
-                        vegetation
-                                ? FlameWave.vegetationEnvelope(
-                                        (burnTime - s.ignition()) / FireField.lifetime(s.fuel()),
-                                        seed)
-                                : 1;
-                double tall =
-                        s.fuel() == 2
-                                ? tile.motion.vegetationHeight(seed)
-                                : .055 + Math.pow(seed, 2.8) * .36;
-                double height = tall * tile.motion.height(seed, heat) * (.4 + .6 * heat) * envelope;
-                float brightness = heat * tile.motion.brightness(seed);
-                double width =
-                        s.fuel() == 2
-                                ? tile.motion.vegetationWidth(seed) * (.7 + .3 * envelope)
-                                : .12 + .10 * noise(site.x() + 73, site.z());
-                billboard(
-                        flames,
-                        x,
-                        site.y() + 1.014,
-                        z,
-                        width,
-                        height,
-                        flatRight,
-                        tile.motion.up(),
-                        seed,
-                        brightness,
-                        false,
-                        LightTexture.FULL_BRIGHT);
-                if (s.fuel() == 2)
-                    billboard(
-                            flames,
-                            x + .04,
-                            site.y() + 1.014,
-                            z - .03,
-                            width * CROSS_FLAME_WIDTH,
-                            height * CROSS_FLAME_HEIGHT,
-                            crossRight,
+                float strength = heat(sample, burnTime);
+                if (strength < .01 || tile == null || !tile.visible) continue;
+                if (!tile.plumes.occupied) VISIBLE_PLUMES.add(tile);
+                tile.plumes.add(
+                        sample.site().x(),
+                        sample.site().z(),
+                        strength,
+                        age / FireField.lifetime(sample.fuel()),
+                        sample.fuel() == 2);
+            }
+            for (var tile : VISIBLE_PLUMES) {
+                var plumes = tile.plumes;
+                for (int group = 0; group < GroundPlumes.COUNT; group++) {
+                    if (plumes.weight[group] == 0) continue;
+                    double x = plumes.x[group] / plumes.weight[group],
+                            z = plumes.z[group] / plumes.weight[group];
+                    float seed =
+                            noise(
+                                    tile.pos.getX() * 8 + (group & 1) * 4,
+                                    tile.pos.getZ() * 8 + (group >> 1) * 4);
+                    boolean grass = plumes.vegetation[group];
+                    double envelope =
+                            grass
+                                    ? FlameWave.vegetationEnvelope(
+                                            plumes.age[group] / plumes.weight[group], seed)
+                                    : 1;
+                    double tall =
+                            grass
+                                    ? tile.motion.vegetationHeight(seed) * 1.22
+                                    : .12 + seed * seed * .36;
+                    double height =
+                            tall
+                                    * tile.motion.height(seed, plumes.heat[group])
+                                    * (.4 + .6 * plumes.heat[group])
+                                    * envelope;
+                    double fullness = Math.min(1, Math.sqrt(plumes.weight[group] / 8));
+                    double width =
+                            (grass ? .46 + .14 * seed : .32 + .12 * seed) * (.6 + .4 * fullness);
+                    JoinedFlames.WORLD.add(
+                            x,
+                            tile.pos.getY() + 1.014,
+                            z,
+                            width,
+                            height,
                             tile.motion.up(),
-                            1 - seed,
-                            brightness * .65f,
-                            false,
-                            LightTexture.FULL_BRIGHT);
+                            seed,
+                            plumes.heat[group] * tile.motion.brightness(seed));
+                }
             }
             BUFFER.endBatch(flameType);
             TorchFlameRenderer.placed(BUFFER.getBuffer(torchType), camera, flatRight);
             CandleFlameRenderer.render(BUFFER.getBuffer(torchType), camera, flatRight);
             BUFFER.endBatch(torchType);
             StructureFireClient.render(e, BUFFER, now, reflectionPass, glowPass, textured);
+            JoinedFlames.WORLD.render(BUFFER, camera, flatRight, reflectionPass);
             if (reflectionPass) return;
             var smoke = BUFFER.getBuffer(smokeType);
             Vec3 up = new Vec3(e.getCamera().getUpVector());

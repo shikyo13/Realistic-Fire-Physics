@@ -33,6 +33,14 @@ public final class FireLighting {
     private final Long2ObjectOpenHashMap<com.zerotheabsolute.surfacefire.structure.BurningBlock>
             structures = new Long2ObjectOpenHashMap<>();
     private volatile Long2ByteMap emitted = Long2ByteMaps.EMPTY_MAP;
+    private final it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap<
+                    com.zerotheabsolute.surfacefire.physics.FallingTimber>
+            timber = new it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap<>();
+
+    public void trackTimber(com.zerotheabsolute.surfacefire.physics.FallingTimber entity) {
+        timber.put(entity.getId(), entity);
+    }
+
     private final com.zerotheabsolute.surfacefire.lighting.LightInvalidation invalidation =
             new com.zerotheabsolute.surfacefire.lighting.LightInvalidation();
 
@@ -172,6 +180,12 @@ public final class FireLighting {
         for (var entry : movingLights.long2ByteEntrySet()) {
             if (entry.getByteValue() > desired.get(entry.getLongKey()))
                 desired.put(entry.getLongKey(), entry.getByteValue());
+        }
+        var moving = timber.values().iterator();
+        while (moving.hasNext()) {
+            var body = moving.next();
+            if (body.isRemoved()) moving.remove();
+            else body.emitLight(desired);
         }
         publish(level, desired);
     }

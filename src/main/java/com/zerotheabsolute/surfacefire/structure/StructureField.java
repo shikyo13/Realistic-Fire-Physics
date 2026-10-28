@@ -248,7 +248,13 @@ public final class StructureField extends SavedData {
                 setDirty();
                 continue;
             }
-            if (local >= block.firstIgnition + block.fuel.consumeTicks
+            boolean weakenedLog =
+                    FireSettings.FALLING_LOGS.get()
+                            && block.state.is(net.minecraft.tags.BlockTags.LOGS_THAT_BURN)
+                            && block.count >= 128;
+            int failureTicks =
+                    weakenedLog ? block.fuel.consumeTicks * 3 / 5 : block.fuel.consumeTicks;
+            if (local >= block.firstIgnition + failureTicks
                     && block.count >= MINIMUM_CONSUMED_CELLS) {
                 consumed.add(block);
                 iterator.remove();
@@ -268,6 +274,9 @@ public final class StructureField extends SavedData {
         terrain.invalidate(block.pos);
         consumedBlocks++;
         remove(level, block);
+        if (block.state.is(net.minecraft.tags.BlockTags.LOGS_THAT_BURN))
+            com.zerotheabsolute.surfacefire.physics.TimberCollapse.get(level)
+                    .lostSupport(block.pos);
         Vec3 center = Vec3.atCenterOf(block.pos);
         for (Direction face : StructureTerrain.FACES) {
             var neighbor = block.pos.relative(face);
@@ -299,6 +308,8 @@ public final class StructureField extends SavedData {
         if (terrain != null) terrain.invalidate(pos);
         var block = blocks.get(pos.asLong());
         if (block != null && !block.matches(state)) {
+            if (block.state.is(net.minecraft.tags.BlockTags.LOGS_THAT_BURN))
+                com.zerotheabsolute.surfacefire.physics.TimberCollapse.get(level).lostSupport(pos);
             if (active.remove(pos.asLong())) clocks.cooled(pos);
             remove(level, block);
         }
@@ -375,6 +386,68 @@ public final class StructureField extends SavedData {
                 + "/"
                 + peakSteps
                 + "]";
+    }
+
+    public com.zerotheabsolute.surfacefire.physics.TimberBlocks movingBlock(
+            ServerLevel level, BlockPos pos, BlockPos offset) {
+        var block = blocks.get(pos.asLong());
+        int[] ages = new int[block == null ? 0 : SurfaceCell.BLOCK_CELLS];
+        if (block != null) {
+            long now = clocks.time(pos, level.getGameTime());
+            for (int i = 0; i < ages.length; i++)
+                ages[i] =
+                        block.ignition[i] < 0
+                                ? -1
+                                : (int) Math.clamp(now - block.ignition[i], 0, 65534);
+        }
+        return new com.zerotheabsolute.surfacefire.physics.TimberBlocks(
+                offset,
+                level.getBlockState(pos),
+                ages,
+                block != null && block.quenched,
+                block == null ? 0 : block.outbreak);
+    }
+
+    public void restoreMoving(
+            ServerLevel level,
+            BlockPos pos,
+            net.minecraft.world.level.block.state.BlockState state,
+            com.zerotheabsolute.surfacefire.physics.TimberBlocks part,
+            int elapsed,
+            boolean wet) {
+        if (part.cellCount() == 0) return;
+        var block = new BurningBlock(pos, state, part.fuel());
+        long now = clocks.activate(level, pos);
+        for (int i = 0; i < part.cellCount(); i++)
+            if (part.ageAt(i) >= 0) block.ignite(i, Math.max(0, now - part.ageAt(i) - elapsed));
+        if (block.count == 0) return;
+        block.quenched = wet || part.quenched();
+        blocks.put(pos.asLong(), block);
+        historyCleanup.added(pos.asLong());
+        clocks.retain(pos);
+        if (!block.quenched && now < block.coolAt()) {
+            long world = level.getGameTime();
+            var outbreaks = FireOutbreaks.get(level);
+            block.outbreak = outbreaks.live(part.outbreak(), world);
+            if (block.outbreak == 0)
+                for (int i = 0; i < block.count; i++)
+                    block.outbreak =
+                            outbreaks.adopt(
+                                    FireOutbreaks.Fuel.STRUCTURE,
+                                    block.outbreak,
+                                    world,
+                                    world + block.coolAt() - now);
+            active.add(pos.asLong());
+            clocks.heated(pos);
+            clocks.track(pos, block.coolAt(), block.outbreak);
+            FireLighting.get(level).acceptStructure(block);
+        }
+        for (int i = 0; i < block.ignition.length; i++)
+            if (block.ignition[i] >= 0) {
+                changes.add(change(block, i));
+                if (block.burning(i, now)) schedule(SurfaceCell.fromIndex(pos, i), block.fuel, now);
+            }
+        setDirty();
     }
 
     public void clear(ServerLevel level) {

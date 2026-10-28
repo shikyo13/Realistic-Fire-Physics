@@ -31,6 +31,7 @@ public final class SurfaceFire {
         container.registerConfig(net.neoforged.fml.config.ModConfig.Type.SERVER, FireSettings.SPEC);
         com.zerotheabsolute.surfacefire.torch.TorchBlocks.BLOCKS.register(modBus);
         com.zerotheabsolute.surfacefire.audio.FireSounds.SOUNDS.register(modBus);
+        com.zerotheabsolute.surfacefire.physics.TimberEntities.TYPES.register(modBus);
         modBus.addListener(FirePacket::register);
         modBus.addListener(FireClockPacket::register);
         modBus.addListener(StructurePacket::register);
@@ -91,6 +92,7 @@ public final class SurfaceFire {
             FireClocks.get(level).tick(level);
             FireField.get(level).tick(level);
             StructureField.get(level).tick(level);
+            com.zerotheabsolute.surfacefire.physics.TimberCollapse.get(level).tick(level);
             IgnitionSources.tick(level);
             com.zerotheabsolute.surfacefire.torch.TorchMigration.tick(level);
             if (level.getGameTime() % FireSettings.TORCH_CHECK_TICKS == 0)
