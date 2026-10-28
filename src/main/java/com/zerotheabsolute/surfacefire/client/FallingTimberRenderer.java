@@ -144,7 +144,8 @@ public final class FallingTimberRenderer extends EntityRenderer<FallingTimber> {
                         .9 * flame.height(seed, 1),
                         flame.up(),
                         seed,
-                        flame.brightness(seed));
+                        flame.brightness(seed),
+                        true);
             }
         }
         movingFlames.render(buffer, camera.getPosition(), right, false);

@@ -375,7 +375,8 @@ final class StructureFireClient {
                                 height,
                                 mesh.motion.up(),
                                 seed,
-                                strength * mesh.motion.brightness(seed));
+                                strength * mesh.motion.brightness(seed),
+                                face.direction.getAxis() != Direction.Axis.Y);
                     }
             }
         }

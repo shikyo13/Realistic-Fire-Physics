@@ -79,4 +79,29 @@ class JoinedFlamesTest {
         assertFalse(fire.connected(0, 1));
         assertFalse(fire.connected(1, 0));
     }
+
+    @Test
+    void verticalPlumesCombineAcrossBlocksAndStayBounded() {
+        var fire = new JoinedFlames();
+        for (int i = 0; i < 5; i++)
+            fire.add(0, .75 + i * .5, 0, .5, .8, new Vec3(0, 1, 0), .4f, 1, true);
+        assertEquals(2, fire.mergeVertical());
+        assertEquals(2, fire.mergeVertical());
+    }
+
+    @Test
+    void verticalJoinDoesNotCrossMissingFuel() {
+        var fire = new JoinedFlames();
+        fire.add(0, 1, 0, .5, .8, new Vec3(0, 1, 0), .4f, 1, true);
+        fire.add(0, 2, 0, .5, .8, new Vec3(0, 1, 0), .4f, 1, true);
+        assertEquals(2, fire.mergeVertical());
+    }
+
+    @Test
+    void groundFlamesDoNotBecomeVerticalColumns() {
+        var fire = new JoinedFlames();
+        add(fire, 0, 1, 0);
+        fire.add(0, 1.5, 0, .5, .8, new Vec3(0, 1, 0), .4f, 1, true);
+        assertEquals(2, fire.mergeVertical());
+    }
 }

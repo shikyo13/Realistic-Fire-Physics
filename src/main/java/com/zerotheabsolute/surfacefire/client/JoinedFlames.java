@@ -19,6 +19,9 @@ final class JoinedFlames {
     private static final double MAX_VERTICAL_STEP = .36, MAX_NEIGHBOR_ALIGNMENT = -.2;
     private static final double MIN_JOIN_HEIGHT = .24, MAX_SPAN_HEIGHT_RATIO = 3;
     private static final int STRIPS = 6;
+    private static final double COLUMN_RADIUS = .22, COLUMN_STEP = .68;
+    private static final double GROUND_DENSITY = 1.15;
+    private final IntArrayList verticalOrder = new IntArrayList();
     private static final float CONNECTION_OPACITY = .22f;
     private static final double CONNECTION_HEIGHT = .22;
     private final ArrayList<Node> nodes = new ArrayList<>();
@@ -27,8 +30,9 @@ final class JoinedFlames {
     private int size, usedBuckets;
 
     private static final class Node {
-        double x, y, z, width, height, upX, upZ;
-        float heat, seed;
+        double x, y, z, width, sourceWidth, height, sourceHeight, upX, upZ;
+        boolean vertical, merged;
+        float heat, sourceHeat, seed;
         int first = -1, second = -1;
     }
 
@@ -46,6 +50,19 @@ final class JoinedFlames {
             Vec3 up,
             float seed,
             float heat) {
+        add(x, y, z, width, height, up, seed, heat, false);
+    }
+
+    void add(
+            double x,
+            double y,
+            double z,
+            double width,
+            double height,
+            Vec3 up,
+            float seed,
+            float heat,
+            boolean vertical) {
         if (heat <= .01 || height < .025) return;
         Node node;
         if (size == nodes.size()) {
@@ -55,12 +72,14 @@ final class JoinedFlames {
         node.x = x;
         node.y = y;
         node.z = z;
-        node.width = width;
-        node.height = height;
+        node.width = node.sourceWidth = width;
+        node.height = node.sourceHeight = height;
+        node.vertical = vertical;
+        node.merged = false;
         node.upX = up.x;
         node.upZ = up.z;
         node.seed = seed;
-        node.heat = heat;
+        node.heat = node.sourceHeat = heat;
         node.first = node.second = -1;
         long key = key(x, y, z);
         var list = grid.get(key);
@@ -81,11 +100,74 @@ final class JoinedFlames {
     }
 
     void link() {
+        mergeVertical();
         for (int i = 0; i < size; i++) {
             var a = nodes.get(i);
-            a.first = a.height < MIN_JOIN_HEIGHT ? -1 : nearest(i, -1);
+            a.first = a.merged || a.height < MIN_JOIN_HEIGHT ? -1 : nearest(i, -1);
             a.second = a.first < 0 ? -1 : nearest(i, a.first);
         }
+    }
+
+    int mergeVertical() {
+        verticalOrder.clear();
+        for (int i = 0; i < size; i++) {
+            var node = nodes.get(i);
+            node.height = node.sourceHeight;
+            node.width = node.sourceWidth;
+            node.heat = node.sourceHeat;
+            node.merged = false;
+            if (node.vertical) verticalOrder.add(i);
+        }
+        verticalOrder.sort((a, b) -> Double.compare(nodes.get(a).y, nodes.get(b).y));
+        int remaining = size;
+        for (int i = 0; i < verticalOrder.size(); i++) {
+            var root = nodes.get(verticalOrder.getInt(i));
+            if (root.merged || root.height < MIN_JOIN_HEIGHT) continue;
+            var tip = root;
+            int limit = root.seed < .3f ? 2 : 3;
+            for (int count = 1; count < limit; count++) {
+                int above = above(tip);
+                if (above < 0) break;
+                tip = nodes.get(above);
+                tip.merged = true;
+                root.height = Math.max(root.height, tip.y - root.y + tip.height);
+                root.heat = Math.max(root.heat, tip.heat);
+                root.width = root.sourceWidth * Math.sqrt(count + 1) * .9;
+                remaining--;
+            }
+        }
+        return remaining;
+    }
+
+    private int above(Node root) {
+        int result = -1;
+        double best = COLUMN_STEP;
+        int minX = (int) Math.floor((root.x - COLUMN_RADIUS) / BUCKET);
+        int maxX = (int) Math.floor((root.x + COLUMN_RADIUS) / BUCKET);
+        int minY = (int) Math.floor((root.y + .12) / BUCKET);
+        int maxY = (int) Math.floor((root.y + COLUMN_STEP) / BUCKET);
+        int minZ = (int) Math.floor((root.z - COLUMN_RADIUS) / BUCKET);
+        int maxZ = (int) Math.floor((root.z + COLUMN_RADIUS) / BUCKET);
+        for (int y = minY; y <= maxY; y++)
+            for (int x = minX; x <= maxX; x++)
+                for (int z = minZ; z <= maxZ; z++) {
+                    var bucket = grid.get(BlockPos.asLong(x, y, z));
+                    if (bucket == null) continue;
+                    for (int i = 0; i < bucket.size(); i++) {
+                        int index = bucket.getInt(i);
+                        var node = nodes.get(index);
+                        double dy = node.y - root.y, dx = node.x - root.x, dz = node.z - root.z;
+                        if (!node.vertical
+                                || node.merged
+                                || node.height < MIN_JOIN_HEIGHT
+                                || dy < .12
+                                || dy > best
+                                || dx * dx + dz * dz > COLUMN_RADIUS * COLUMN_RADIUS) continue;
+                        best = dy;
+                        result = index;
+                    }
+                }
+        return result;
     }
 
     boolean connected(int a, int b) {
@@ -112,7 +194,7 @@ final class JoinedFlames {
                         int j = bucket.getInt(k);
                         if (j == index || j == opposite) continue;
                         var b = nodes.get(j);
-                        if (b.height < MIN_JOIN_HEIGHT) continue;
+                        if (b.merged || b.height < MIN_JOIN_HEIGHT) continue;
                         double x = b.x - a.x, z = b.z - a.z, y = b.y - a.y, d = x * x + z * z;
                         if (Math.abs(y) > MAX_VERTICAL_STEP || d < .015 || d > best) continue;
                         if (other != null) {
@@ -136,7 +218,8 @@ final class JoinedFlames {
         var vertices = buffer.getBuffer(type);
         for (int i = 0; i < size; i++) {
             var b = nodes.get(i);
-            if (b.first < 0) {
+            if (b.merged) continue;
+            if (b.first < 0 && !b.vertical) {
                 FlameGeometry.plume(
                         vertices,
                         camera,
@@ -144,7 +227,7 @@ final class JoinedFlames {
                         b.x,
                         b.y,
                         b.z,
-                        b.width,
+                        b.width * (b.vertical ? 1 : GROUND_DENSITY),
                         b.height,
                         right,
                         new Vec3(b.upX, 1, b.upZ),
@@ -153,26 +236,33 @@ final class JoinedFlames {
                         net.minecraft.client.renderer.LightTexture.FULL_BRIGHT);
                 continue;
             }
-            if (b.first < i && connected(b.first, i))
+            if (b.first >= 0 && b.first < i && connected(b.first, i))
                 connect(vertices, camera, nodes.get(b.first), b);
             if (b.second >= 0 && b.second < i && connected(b.second, i))
                 connect(vertices, camera, nodes.get(b.second), b);
-            var a = nodes.get(b.first);
+            var a = b.first < 0 ? null : nodes.get(b.first);
             var c = b.second < 0 ? null : nodes.get(b.second);
-            double tx = c == null ? b.x - a.x : c.x - a.x;
-            double tz = c == null ? b.z - a.z : c.z - a.z;
+            double tx = a == null ? right.x : c == null ? b.x - a.x : c.x - a.x;
+            double tz = a == null ? right.z : c == null ? b.z - a.z : c.z - a.z;
             double length = Math.sqrt(tx * tx + tz * tz);
             tx /= Math.max(.001, length);
             tz /= Math.max(.001, length);
             double span =
-                    Math.min(b.height * MAX_SPAN_HEIGHT_RATIO, Math.max(b.width, length * .9));
+                    Math.min(
+                            b.height * MAX_SPAN_HEIGHT_RATIO,
+                            Math.max(b.width, a == null ? b.width : length * .9)
+                                    * (b.vertical ? 1 : GROUND_DENSITY));
             int frame = ShaderPackRendering.frame(FlameWave.texturePhase(b.x, b.y, b.z, b.seed));
-            for (int slice = 0; slice < STRIPS; slice++) {
-                double u = slice / (double) STRIPS, v = (slice + 1) / (double) STRIPS;
-                emit(vertices, camera, frame, b, tx, tz, span, u, false);
-                emit(vertices, camera, frame, b, tx, tz, span, v, false);
-                emit(vertices, camera, frame, b, tx, tz, span, v, true);
-                emit(vertices, camera, frame, b, tx, tz, span, u, true);
+            int rows = b.vertical ? 3 : 1;
+            for (int row = 0; row < rows; row++) {
+                double low = row / (double) rows, high = (row + 1) / (double) rows;
+                for (int slice = 0; slice < STRIPS; slice++) {
+                    double u = slice / (double) STRIPS, v = (slice + 1) / (double) STRIPS;
+                    emit(vertices, camera, frame, b, tx, tz, span, u, low);
+                    emit(vertices, camera, frame, b, tx, tz, span, v, low);
+                    emit(vertices, camera, frame, b, tx, tz, span, v, high);
+                    emit(vertices, camera, frame, b, tx, tz, span, u, high);
+                }
             }
             // A soft crossed core preserves volume when the surface is viewed along its edge.
             double facing = Math.abs(tx * right.x + tz * right.z);
@@ -237,23 +327,23 @@ final class JoinedFlames {
             double tz,
             double span,
             double u,
-            boolean top) {
+            double rise) {
         double x = b.x + tx * span * (u - .5);
         double y = b.y;
         double z = b.z + tz * span * (u - .5);
-        if (top) {
-            double fold = Math.sin(u * Math.PI) * span * .12;
-            x += b.upX * b.height - tz * fold;
-            y += b.height;
-            z += b.upZ * b.height + tx * fold;
-        }
+        double bend =
+                b.vertical ? Math.sqrt(b.sourceHeight * b.height) * rise * rise : b.height * rise;
+        double fold = Math.sin(u * Math.PI) * span * .12 * rise;
+        x += b.upX * bend - tz * fold;
+        y += b.height * rise;
+        z += b.upZ * bend + tx * fold;
         ShaderPackRendering.animatedVertex(
                 vertex,
                 (float) (x - camera.x),
                 (float) (y - camera.y),
                 (float) (z - camera.z),
                 (float) u,
-                top ? 1 : 0,
+                (float) rise,
                 frame,
                 b.heat * .85f);
     }
