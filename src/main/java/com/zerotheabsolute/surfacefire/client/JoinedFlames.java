@@ -22,6 +22,7 @@ final class JoinedFlames {
     private static final double COLUMN_RADIUS = .22, COLUMN_STEP = .68;
     private static final double ISOLATED_GROUND_DENSITY = 1.15;
     private static final double CONNECTED_GROUND_DENSITY = 1.45;
+    private static final double COVERAGE_GAIN = 1.25;
     private static final int BRIDGE_STRIPS = 3;
     private static final float BRIDGE_HEAT = .90f;
     private final IntArrayList verticalOrder = new IntArrayList();
@@ -33,9 +34,11 @@ final class JoinedFlames {
     private final ArrayList<IntArrayList> buckets = new ArrayList<>();
     private final Long2ObjectOpenHashMap<IntArrayList> grid = new Long2ObjectOpenHashMap<>();
     private int size, usedBuckets;
+    private boolean linked;
 
     private static final class Node {
         double x, y, z, width, sourceWidth, height, sourceHeight, upX, upZ;
+        double thickness;
         boolean vertical, merged;
         float heat, sourceHeat, seed;
         int first = -1, second = -1;
@@ -43,6 +46,7 @@ final class JoinedFlames {
 
     void clear() {
         size = usedBuckets = 0;
+        linked = false;
         grid.clear();
     }
 
@@ -69,6 +73,7 @@ final class JoinedFlames {
             float heat,
             boolean vertical) {
         if (heat <= .01 || height < .025) return;
+        linked = false;
         Node node;
         if (size == nodes.size()) {
             node = new Node();
@@ -80,6 +85,7 @@ final class JoinedFlames {
         node.width = node.sourceWidth = width;
         node.height = node.sourceHeight = height;
         node.vertical = vertical;
+        node.thickness = vertical ? 1 : FlameWave.bandThickness(x, z);
         node.merged = false;
         node.upX = up.x;
         node.upZ = up.z;
@@ -105,6 +111,8 @@ final class JoinedFlames {
     }
 
     void link() {
+        if (linked) return;
+        linked = true;
         mergeVertical();
         for (int i = 0; i < size; i++) {
             var a = nodes.get(i);
@@ -232,7 +240,8 @@ final class JoinedFlames {
                         b.x,
                         b.y,
                         b.z,
-                        b.width * ISOLATED_GROUND_DENSITY,
+                        b.width * ISOLATED_GROUND_DENSITY * COVERAGE_GAIN,
+                        b.thickness / COVERAGE_GAIN,
                         b.height,
                         right,
                         new Vec3(b.upX, 1, b.upZ),
@@ -254,9 +263,10 @@ final class JoinedFlames {
             tz /= Math.max(.001, length);
             double span =
                     Math.min(
-                            b.height * MAX_SPAN_HEIGHT_RATIO,
-                            Math.max(b.width, a == null ? b.width : length * .9)
-                                    * (b.vertical ? 1 : CONNECTED_GROUND_DENSITY));
+                                    b.height * MAX_SPAN_HEIGHT_RATIO,
+                                    Math.max(b.width, a == null ? b.width : length * .9)
+                                            * (b.vertical ? 1 : CONNECTED_GROUND_DENSITY))
+                            * (b.vertical ? 1 : COVERAGE_GAIN);
             int frame = ShaderPackRendering.frame(FlameWave.texturePhase(b.x, b.y, b.z, b.seed));
             int rows = b.vertical ? 3 : 1;
             for (int row = 0; row < rows; row++) {
@@ -279,7 +289,7 @@ final class JoinedFlames {
                         b.x,
                         b.y,
                         b.z,
-                        b.width * .9,
+                        b.width * .9 * b.thickness,
                         b.height * .85,
                         right,
                         new Vec3(b.upX, 1, b.upZ),
@@ -288,7 +298,15 @@ final class JoinedFlames {
                         false,
                         net.minecraft.client.renderer.LightTexture.FULL_BRIGHT);
         }
-        if (buffer instanceof MultiBufferSource.BufferSource batches) batches.endBatch(type);
+        if (buffer instanceof MultiBufferSource.BufferSource batches) {
+            // BufferSource consumes the sort state during this call; its centers do not escape.
+            FlameSortScratch.begin();
+            try {
+                batches.endBatch(type);
+            } finally {
+                FlameSortScratch.end();
+            }
+        }
     }
 
     private void connect(VertexConsumer vertex, Vec3 camera, Node a, Node b) {
@@ -310,13 +328,15 @@ final class JoinedFlames {
         bridge.x = (a.x + b.x) * .5;
         bridge.y = (a.y + b.y) * .5;
         bridge.z = (a.z + b.z) * .5;
+        bridge.thickness = (a.thickness + b.thickness) * .5;
         bridge.seed = (a.seed + b.seed) * .5f;
         bridge.height =
                 bridge.sourceHeight = Math.min(a.height, b.height) * (.58 + .26 * bridge.seed);
         bridge.upX = (a.upX + b.upX) * .5;
         bridge.upZ = (a.upZ + b.upZ) * .5;
         bridge.heat = Math.min(a.heat, b.heat) * BRIDGE_HEAT;
-        double span = Math.min(distance * 1.15, bridge.height * MAX_SPAN_HEIGHT_RATIO);
+        double span =
+                Math.min(distance * 1.15, bridge.height * MAX_SPAN_HEIGHT_RATIO) * COVERAGE_GAIN;
         for (int strip = 0; strip < BRIDGE_STRIPS; strip++) {
             double u = strip / (double) BRIDGE_STRIPS, v = (strip + 1) / (double) BRIDGE_STRIPS;
             emit(vertex, camera, frame, bridge, dx / distance, dz / distance, span, u, 0);
@@ -361,7 +381,13 @@ final class JoinedFlames {
         double z = b.z + tz * span * (u - .5);
         double bend =
                 b.vertical ? Math.sqrt(b.sourceHeight * b.height) * rise * rise : b.height * rise;
-        double fold = Math.sin(u * Math.PI) * span * .12 * rise;
+        double fold =
+                Math.sin(u * Math.PI)
+                        * span
+                        * .12
+                        * rise
+                        * b.thickness
+                        / (b.vertical ? 1 : COVERAGE_GAIN);
         x += b.upX * bend - tz * fold;
         y += b.height * rise;
         z += b.upZ * bend + tx * fold;

@@ -19,7 +19,7 @@ final class FireParticleSimulation {
     static final class Particle {
         boolean smoke;
         double x, y, z, oldX, oldY, oldZ, vx, vy, vz, age, lifetime;
-        double radius, rotation, spin, phase, heat, distance;
+        double radius, rotation, spin, phase, heat, distance, scale;
     }
 
     FireParticleSimulation() {
@@ -45,6 +45,7 @@ final class FireParticleSimulation {
         p.smoke = smoke;
         p.heat = Math.clamp(heat, 0, 1);
         p.age = 0;
+        p.scale = 1;
         p.lifetime = smoke ? 4.8 + random(seed + 1) * 2.8 : 2.5 + random(seed + 1) * 3;
         p.x = p.oldX = x + (random(seed + 2) - .5) * .5;
         p.y = p.oldY = y + random(seed + 3) * .15;
@@ -58,6 +59,34 @@ final class FireParticleSimulation {
         p.phase = random(seed + 11);
         if (smoke) smokeCount++;
         else sparkCount++;
+        return true;
+    }
+
+    boolean spawnSmall(
+            boolean smoke,
+            double x,
+            double y,
+            double z,
+            double scale,
+            double vx,
+            double vy,
+            double vz,
+            long seed) {
+        if (!Double.isFinite(scale + vx + vy + vz)
+                || scale <= 0
+                || scale > 1
+                || !spawn(smoke, x, y, z, 1, seed)) return false;
+        var p = particles[size - 1];
+        p.scale = scale;
+        p.x = p.oldX = x + (p.x - x) * scale;
+        p.y = p.oldY = y + (p.y - y) * scale;
+        p.z = p.oldZ = z + (p.z - z) * scale;
+        p.radius *= scale;
+        p.lifetime *= .65 + .35 * scale;
+        p.heat *= Math.sqrt(scale);
+        p.vx = p.vx * scale + vx * .35;
+        p.vy = p.vy * Math.sqrt(scale) + vy * .35;
+        p.vz = p.vz * scale + vz * .35;
         return true;
     }
 

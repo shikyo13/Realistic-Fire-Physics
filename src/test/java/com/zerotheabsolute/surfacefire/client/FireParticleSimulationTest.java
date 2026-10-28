@@ -80,6 +80,18 @@ class FireParticleSimulationTest {
     }
 
     @Test
+    void smallWicksScaleTheirParticlesAndInheritEmitterMomentum() {
+        var fire = new FireParticleSimulation();
+        var torch = new FireParticleSimulation();
+        fire.spawn(false, 0, 0, 0, 1, 55);
+        assertTrue(torch.spawnSmall(false, 0, 0, 0, .35, 3, 0, 0, 55));
+        assertEquals(fire.get(0).radius * .35, torch.get(0).radius, 1e-9);
+        assertTrue(torch.get(0).lifetime < fire.get(0).lifetime);
+        assertEquals(fire.get(0).vx * .35 + 3 * .35, torch.get(0).vx, 1e-9);
+        assertFalse(torch.spawnSmall(true, 0, 0, 0, Double.NaN, 0, 0, 0, 1));
+    }
+
+    @Test
     void resetAndInvalidInputsCannotLeaveStrayParticles() {
         var model = new FireParticleSimulation();
         assertFalse(model.spawn(true, Double.NaN, 0, 0, 1, 1));

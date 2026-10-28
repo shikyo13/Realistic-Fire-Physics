@@ -122,7 +122,7 @@ final class FallingTimberFlames {
         MESHES.clear();
     }
 
-    static void collect(RenderLevelStageEvent event, double now) {
+    static void collect(RenderLevelStageEvent event, double now, boolean collectFlames) {
         var level = Minecraft.getInstance().level;
         float partial = event.getPartialTick().getGameTimeDeltaPartialTick(false);
         var entries = MESHES.entrySet().iterator();
@@ -159,6 +159,7 @@ final class FallingTimberFlames {
                         z = position.z + mesh.point.z;
                 // Flame volume rises beyond its source face; depth testing handles occlusion.
                 FireParticles.offer(x, y + .15, z, strength, strength);
+                if (!collectFlames) continue;
                 double coverage =
                         source.coverage + (source.nextCoverage - source.coverage) * partial;
                 double fullness = .55 + .45 * Math.sqrt(coverage / (GROUP_WIDTH * GROUP_WIDTH));

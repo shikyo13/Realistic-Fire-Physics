@@ -52,6 +52,12 @@ public final class FireClient {
             event.registerReloadListener(
                     (net.minecraft.server.packs.resources.ResourceManagerReloadListener)
                             EmberCoverage::reload);
+            event.registerReloadListener(
+                    (net.minecraft.server.packs.resources.ResourceManagerReloadListener)
+                            resources -> {
+                                ShaderPackRendering.preloadTextures();
+                                FlameSortScratch.clear();
+                            });
         }
 
         @SubscribeEvent
@@ -130,6 +136,7 @@ public final class FireClient {
         boolean reset = p.reset() || !dimension.equals(p.dimension());
         if (reset) {
             FireParticles.clear();
+            TorchParticleSources.clear();
             PlantBurnMasks.clear();
             GroundBurnMasks.clear();
             SAMPLES.clear();
@@ -245,6 +252,8 @@ public final class FireClient {
 
     @SubscribeEvent
     public static void logout(ClientPlayerNetworkEvent.LoggingOut e) {
+        FlameSortScratch.clear();
+        ScorchedTerrainModel.clear();
         FireClocks.clearClient();
         SAMPLES.clear();
         MESH.clear();
@@ -257,6 +266,7 @@ public final class FireClient {
         JoinedFlames.WORLD.clear();
         FallingTimberFlames.clear();
         FireParticles.clear();
+        TorchParticleSources.clear();
         dimension = "";
         TorchFlameRenderer.clear();
         CandleFlameRenderer.clear();
@@ -318,7 +328,6 @@ public final class FireClient {
         boolean coverageChecked, fullCoverage;
         long coverageSettlesAt;
         boolean visible;
-        int light;
         double distance, time;
         final FlameMotion motion = new FlameMotion();
         final GroundPlumes plumes = new GroundPlumes();
@@ -454,11 +463,13 @@ public final class FireClient {
             var vertices = BUFFER.getBuffer(layer.type);
             for (var tile : TILES.values()) {
                 if (!tile.visible || !tile.hasLayer(layer, tile.time)) continue;
+                if (layer == ShaderPackRendering.GroundLayer.HEAT
+                        && drawUniformHeat(vertices, tile, now)) continue;
                 if (layer == ShaderPackRendering.GroundLayer.EMBER
                         && tile.distance > DETAILED_EMBER_DISTANCE_SQUARED) {
                     tile.settleCoverage(now);
                     if (tile.fullCoverage) {
-                        drawGroundQuad(vertices, tile.fullQuad, layer, now, tile.light);
+                        drawGroundQuad(vertices, tile.fullQuad, layer, now);
                         continue;
                     }
                 }
@@ -466,23 +477,39 @@ public final class FireClient {
                     var quad = tile.quads.get(quadIndex);
                     if (layer == ShaderPackRendering.GroundLayer.EMBER
                             && !EmberCoverage.contains(quad.a.x, quad.a.z)) continue;
-                    drawGroundQuad(vertices, quad, layer, now, tile.light);
+                    drawGroundQuad(vertices, quad, layer, now);
                 }
             }
             BUFFER.endBatch(layer.type);
         }
     }
 
+    private static boolean drawUniformHeat(VertexConsumer vertices, Tile tile, double now) {
+        if (tile.quads.size() != 64) return false;
+        var layer = ShaderPackRendering.GroundLayer.HEAT;
+        float alpha = tile.fullQuad.a.alpha(layer, now);
+        for (int i = 0; i < tile.quads.size(); i++) {
+            var quad = tile.quads.get(i);
+            if (quad.a.alpha(layer, now) != alpha
+                    || quad.b.alpha(layer, now) != alpha
+                    || quad.c.alpha(layer, now) != alpha
+                    || quad.d.alpha(layer, now) != alpha) return false;
+        }
+        // The flat surface and world-space UVs are unchanged. Only identical heat colors merge;
+        // moving boundaries and spatially flickering embers retain their original subdivisions.
+        drawGroundQuad(vertices, tile.fullQuad, layer, now);
+        return true;
+    }
+
     private static void drawGroundQuad(
             VertexConsumer vertices,
             GroundQuad quad,
             ShaderPackRendering.GroundLayer layer,
-            double now,
-            int light) {
+            double now) {
         float a = quad.a.alpha(layer, now), b = quad.b.alpha(layer, now);
         float c = quad.c.alpha(layer, now), d = quad.d.alpha(layer, now);
         if (a + b + c + d < .005f) return;
-        int packedLight = layer.isEmissive() ? LightTexture.FULL_BRIGHT : light;
+        int packedLight = LightTexture.FULL_BRIGHT;
         drawGroundCorner(vertices, quad.a, a, packedLight);
         drawGroundCorner(vertices, quad.b, b, packedLight);
         drawGroundCorner(vertices, quad.c, c, packedLight);
@@ -538,6 +565,9 @@ public final class FireClient {
         boolean reflectionPass =
                 textured && e.getStage() == RenderLevelStageEvent.Stage.AFTER_BLOCK_ENTITIES;
         boolean glowPass = textured && e.getStage() == RenderLevelStageEvent.Stage.AFTER_WEATHER;
+        if (mc.level != null
+                && (reflectionPass || e.getStage() == RenderLevelStageEvent.Stage.AFTER_WEATHER)
+                && !ShaderPackRendering.shadowPass()) TorchParticleSources.view(e);
         if ((!reflectionPass
                         && !glowPass
                         && (textured || e.getStage() != RenderLevelStageEvent.Stage.AFTER_WEATHER))
@@ -547,6 +577,7 @@ public final class FireClient {
                         && !CandleFlameRenderer.hasPlaced()
                         && !FallingTimberFlames.hasFire()
                         && !FireParticles.hasParticles()
+                        && !TorchParticleSources.hasSources()
                         && !StructureFireClient.hasFire())
                 || FireRenderTypes.ground == null
                 || !dimension.equals(mc.level.dimension().location().toString())) return;
@@ -588,8 +619,6 @@ public final class FireClient {
                     if (tile.visible && tile.time < tile.flameUntil)
                         tile.motion.update(
                                 now / 20, tile.pos.getX(), tile.pos.getY(), tile.pos.getZ());
-                    if (tile.visible && textured)
-                        tile.light = LevelRenderer.getLightColor(mc.level, tile.pos.above());
                     if (!tile.visible || textured || tile.time >= tile.effectsUntil) continue;
                     for (var q : tile.quads) {
                         q.a.draw(ground, now);
@@ -603,78 +632,80 @@ public final class FireClient {
             Vec3 right = new Vec3(e.getCamera().getLeftVector()).scale(-1);
             Vec3 flatRight = new Vec3(right.x, 0, right.z).normalize();
             FireParticles.begin(mc.level, camera, !reflectionPass);
-            JoinedFlames.WORLD.clear();
-            for (var tile : VISIBLE_PLUMES) tile.plumes.clear();
-            VISIBLE_PLUMES.clear();
-            var flames = BUFFER.getBuffer(flameType);
-            var activeFlames = FLAME_SITES.values().iterator();
-            while (activeFlames.hasNext()) {
-                var sample = activeFlames.next();
-                var tile = TILES.get(sample.block());
-                double burnTime =
-                        tile == null
-                                ? FireClocks.get(mc.level).time(sample.block(), now)
-                                : tile.time;
-                double age = burnTime - sample.ignition();
-                if (age >= FireField.lifetime(sample.fuel())) {
-                    activeFlames.remove();
-                    continue;
+            if (!glowPass) {
+                JoinedFlames.WORLD.clear();
+                for (var tile : VISIBLE_PLUMES) tile.plumes.clear();
+                VISIBLE_PLUMES.clear();
+                var activeFlames = FLAME_SITES.values().iterator();
+                while (activeFlames.hasNext()) {
+                    var sample = activeFlames.next();
+                    var tile = TILES.get(sample.block());
+                    double burnTime =
+                            tile == null
+                                    ? FireClocks.get(mc.level).time(sample.block(), now)
+                                    : tile.time;
+                    double age = burnTime - sample.ignition();
+                    if (age >= FireField.lifetime(sample.fuel())) {
+                        activeFlames.remove();
+                        continue;
+                    }
+                    float strength = heat(sample, burnTime);
+                    if (strength < .01 || tile == null || !tile.visible) continue;
+                    if (!tile.plumes.occupied) VISIBLE_PLUMES.add(tile);
+                    tile.plumes.add(
+                            sample.site().x(),
+                            sample.site().z(),
+                            strength,
+                            age / FireField.lifetime(sample.fuel()),
+                            sample.fuel() == 2);
                 }
-                float strength = heat(sample, burnTime);
-                if (strength < .01 || tile == null || !tile.visible) continue;
-                if (!tile.plumes.occupied) VISIBLE_PLUMES.add(tile);
-                tile.plumes.add(
-                        sample.site().x(),
-                        sample.site().z(),
-                        strength,
-                        age / FireField.lifetime(sample.fuel()),
-                        sample.fuel() == 2);
-            }
-            for (var tile : VISIBLE_PLUMES) {
-                var plumes = tile.plumes;
-                for (int group = 0; group < GroundPlumes.COUNT; group++) {
-                    if (plumes.weight[group] == 0) continue;
-                    double x = plumes.x[group] / plumes.weight[group],
-                            z = plumes.z[group] / plumes.weight[group];
-                    float seed =
-                            noise(
-                                    tile.pos.getX() * 8 + (group & 1) * 4,
-                                    tile.pos.getZ() * 8 + (group >> 1) * 4);
-                    boolean grass = plumes.vegetation[group];
-                    double envelope =
-                            grass
-                                    ? FlameWave.vegetationEnvelope(
-                                            plumes.age[group] / plumes.weight[group], seed)
-                                    : 1;
-                    double tall =
-                            grass
-                                    ? tile.motion.vegetationHeight(seed) * 1.22
-                                    : .12 + seed * seed * .36;
-                    double height =
-                            tall
-                                    * tile.motion.height(seed, plumes.heat[group])
-                                    * (.4 + .6 * plumes.heat[group])
-                                    * envelope;
-                    double fullness = Math.min(1, Math.sqrt(plumes.weight[group] / 8));
-                    double width =
-                            (grass ? .46 + .14 * seed : .32 + .12 * seed) * (.6 + .4 * fullness);
-                    JoinedFlames.WORLD.add(
-                            x,
-                            tile.pos.getY() + 1.014,
-                            z,
-                            width,
-                            height,
-                            tile.motion.up(),
-                            seed,
-                            plumes.heat[group] * tile.motion.brightness(seed));
+                for (var tile : VISIBLE_PLUMES) {
+                    var plumes = tile.plumes;
+                    for (int group = 0; group < GroundPlumes.COUNT; group++) {
+                        if (plumes.weight[group] == 0) continue;
+                        double x = plumes.x[group] / plumes.weight[group],
+                                z = plumes.z[group] / plumes.weight[group];
+                        float seed =
+                                noise(
+                                        tile.pos.getX() * 8 + (group & 1) * 4,
+                                        tile.pos.getZ() * 8 + (group >> 1) * 4);
+                        boolean grass = plumes.vegetation[group];
+                        double envelope =
+                                grass
+                                        ? FlameWave.vegetationEnvelope(
+                                                plumes.age[group] / plumes.weight[group], seed)
+                                        : 1;
+                        double tall =
+                                grass
+                                        ? tile.motion.vegetationHeight(seed) * 1.22
+                                        : .12 + seed * seed * .36;
+                        double height =
+                                tall
+                                        * tile.motion.height(seed, plumes.heat[group])
+                                        * (.4 + .6 * plumes.heat[group])
+                                        * envelope;
+                        double fullness = Math.min(1, Math.sqrt(plumes.weight[group] / 8));
+                        double width =
+                                (grass ? .46 + .14 * seed : .32 + .12 * seed)
+                                        * (.6 + .4 * fullness);
+                        JoinedFlames.WORLD.add(
+                                x,
+                                tile.pos.getY() + 1.014,
+                                z,
+                                width,
+                                height,
+                                tile.motion.up(),
+                                seed,
+                                plumes.heat[group] * tile.motion.brightness(seed));
+                    }
                 }
+                BUFFER.endBatch(flameType);
             }
-            BUFFER.endBatch(flameType);
             TorchFlameRenderer.placed(BUFFER.getBuffer(torchType), camera, flatRight);
             CandleFlameRenderer.render(BUFFER.getBuffer(torchType), camera, flatRight);
             BUFFER.endBatch(torchType);
             StructureFireClient.render(e, BUFFER, now, reflectionPass, glowPass, textured);
-            FallingTimberFlames.collect(e, now);
+            FallingTimberFlames.collect(e, now, !glowPass);
             JoinedFlames.WORLD.render(BUFFER, camera, flatRight, reflectionPass);
             if (reflectionPass) return;
 

@@ -286,8 +286,11 @@ final class StructureFireClient {
                         var neighbor = mesh.block.pos.relative(face.direction);
                         face.visible =
                                 !mc.level.getBlockState(neighbor).isSolidRender(mc.level, neighbor)
-                                        && camera.subtract(Vec3.atCenterOf(mesh.block.pos))
-                                                        .dot(face.normal)
+                                        && ((camera.x - mesh.block.pos.getX() - .5) * face.normal.x
+                                                        + (camera.y - mesh.block.pos.getY() - .5)
+                                                                * face.normal.y
+                                                        + (camera.z - mesh.block.pos.getZ() - .5)
+                                                                * face.normal.z)
                                                 > -.1;
                     }
                 VISIBLE.add(mesh);
@@ -336,48 +339,52 @@ final class StructureFireClient {
         var vertices = buffer.getBuffer(flameType);
         Vec3 right = new Vec3(event.getCamera().getLeftVector()).scale(-1);
         Vec3 flatRight = new Vec3(right.x, 0, right.z).normalize();
-        for (var mesh : VISIBLE) {
-            if (mesh.block.quenched
-                    || mesh.time >= mesh.block.lastIgnition + mesh.block.fuel.flameTicks) continue;
-            for (var face : mesh.faces) {
-                if (face == null || !face.visible) continue;
-                // Overlapping plumes share the face's motion; char retains the full cell grid.
-                for (int v = 0; v < GRID; v += PLUME_WIDTH)
-                    for (int u = 0; u < GRID; u += PLUME_WIDTH) {
-                        float strength = 0;
-                        float coverage = 0;
-                        for (int dv = 0; dv < PLUME_WIDTH; dv++)
-                            for (int du = 0; du < PLUME_WIDTH; du++) {
-                                int index =
-                                        face.direction.get3DDataValue() * SurfaceCell.FACE_CELLS
-                                                + (v + dv) * GRID
-                                                + u
-                                                + du;
-                                float heat = intensity(mesh.block, index, mesh.time);
-                                strength = Math.max(strength, heat);
-                                coverage += heat;
-                            }
-                        if (strength < .01f) continue;
-                        float fullness = (float) Math.sqrt(coverage / (PLUME_WIDTH * PLUME_WIDTH));
-                        // Keep the group's shape and root stable as its hottest cell changes.
-                        int local = v * GRID + u;
-                        float seed = face.seeds[local];
-                        var point = face.anchors[local];
-                        double height =
-                                (mesh.block.fuel == StructureFuel.LEAVES ? .82 : .78)
-                                        * (.55 + .45 * fullness)
-                                        * mesh.motion.height(seed, strength);
-                        JoinedFlames.WORLD.add(
-                                point.x,
-                                point.y - .16,
-                                point.z,
-                                (.46 + seed * .16) * (.55 + .45 * fullness),
-                                height,
-                                mesh.motion.up(),
-                                seed,
-                                strength * mesh.motion.brightness(seed),
-                                face.direction.getAxis() != Direction.Axis.Y);
-                    }
+        if (!glow) {
+            for (var mesh : VISIBLE) {
+                if (mesh.block.quenched
+                        || mesh.time >= mesh.block.lastIgnition + mesh.block.fuel.flameTicks)
+                    continue;
+                for (var face : mesh.faces) {
+                    if (face == null || !face.visible) continue;
+                    // Overlapping plumes share the face's motion; char retains the full cell grid.
+                    for (int v = 0; v < GRID; v += PLUME_WIDTH)
+                        for (int u = 0; u < GRID; u += PLUME_WIDTH) {
+                            float strength = 0;
+                            float coverage = 0;
+                            for (int dv = 0; dv < PLUME_WIDTH; dv++)
+                                for (int du = 0; du < PLUME_WIDTH; du++) {
+                                    int index =
+                                            face.direction.get3DDataValue() * SurfaceCell.FACE_CELLS
+                                                    + (v + dv) * GRID
+                                                    + u
+                                                    + du;
+                                    float heat = intensity(mesh.block, index, mesh.time);
+                                    strength = Math.max(strength, heat);
+                                    coverage += heat;
+                                }
+                            if (strength < .01f) continue;
+                            float fullness =
+                                    (float) Math.sqrt(coverage / (PLUME_WIDTH * PLUME_WIDTH));
+                            // Keep the group's shape and root stable as its hottest cell changes.
+                            int local = v * GRID + u;
+                            float seed = face.seeds[local];
+                            var point = face.anchors[local];
+                            double height =
+                                    (mesh.block.fuel == StructureFuel.LEAVES ? .82 : .78)
+                                            * (.55 + .45 * fullness)
+                                            * mesh.motion.height(seed, strength);
+                            JoinedFlames.WORLD.add(
+                                    point.x,
+                                    point.y - .16,
+                                    point.z,
+                                    (.46 + seed * .16) * (.55 + .45 * fullness),
+                                    height,
+                                    mesh.motion.up(),
+                                    seed,
+                                    strength * mesh.motion.brightness(seed),
+                                    face.direction.getAxis() != Direction.Axis.Y);
+                        }
+                }
             }
         }
         buffer.endBatch(flameType);

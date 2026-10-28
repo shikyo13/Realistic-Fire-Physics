@@ -9,7 +9,9 @@
     "TorchParticleMixin",
     "TorchItemLightMixin",
     "CandleFlameMixin",
-    "TerrainScorchMixin"
+    "TerrainScorchMixin",
+    "IrisFlameMaterialMixin",
+    "FlameSortMixin"
   ],
   "injectors": {
     "defaultRequire": 1

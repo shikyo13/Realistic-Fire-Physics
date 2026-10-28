@@ -50,6 +50,7 @@ final class ScorchedTerrainModel extends BakedModelWrapper<BakedModel> {
     private record UniformKey(BakedQuad source, int subdivisions) {}
 
     private static final int MAX_UNIFORM_QUADS = 4096;
+    private static final ScorchCellMeshes CELLS = new ScorchCellMeshes(32768);
     private static final LoadingCache<UniformKey, List<BakedQuad>> UNIFORM =
             CacheBuilder.newBuilder()
                     .maximumSize(MAX_UNIFORM_QUADS)
@@ -81,10 +82,7 @@ final class ScorchedTerrainModel extends BakedModelWrapper<BakedModel> {
     public static final class Registration {
         @SubscribeEvent
         public static void models(ModelEvent.ModifyBakingResult event) {
-            synchronized (QUADS) {
-                QUADS.clear();
-            }
-            UNIFORM.invalidateAll();
+            clear();
             for (var block : BuiltInRegistries.BLOCK)
                 if (!block.defaultBlockState().isAir())
                     for (var state : block.getStateDefinition().getPossibleStates()) {
@@ -94,6 +92,14 @@ final class ScorchedTerrainModel extends BakedModelWrapper<BakedModel> {
                                         key, (unused, model) -> new ScorchedTerrainModel(model));
                     }
         }
+    }
+
+    static void clear() {
+        synchronized (QUADS) {
+            QUADS.clear();
+        }
+        UNIFORM.invalidateAll();
+        CELLS.clear();
     }
 
     @Override
@@ -166,36 +172,7 @@ final class ScorchedTerrainModel extends BakedModelWrapper<BakedModel> {
                         mask,
                         tint);
         for (int y = 0; y < steps; y++)
-            for (int x = 0; x < steps; x++) {
-                int[] vertices = new int[VERTEX_STRIDE * 4];
-                System.arraycopy(grid, (y * width + x) * VERTEX_STRIDE, vertices, 0, VERTEX_STRIDE);
-                System.arraycopy(
-                        grid,
-                        (y * width + x + 1) * VERTEX_STRIDE,
-                        vertices,
-                        VERTEX_STRIDE,
-                        VERTEX_STRIDE);
-                System.arraycopy(
-                        grid,
-                        ((y + 1) * width + x + 1) * VERTEX_STRIDE,
-                        vertices,
-                        2 * VERTEX_STRIDE,
-                        VERTEX_STRIDE);
-                System.arraycopy(
-                        grid,
-                        ((y + 1) * width + x) * VERTEX_STRIDE,
-                        vertices,
-                        3 * VERTEX_STRIDE,
-                        VERTEX_STRIDE);
-                output.add(
-                        new BakedQuad(
-                                vertices,
-                                -1,
-                                quad.getDirection(),
-                                quad.getSprite(),
-                                quad.isShade(),
-                                quad.hasAmbientOcclusion()));
-            }
+            for (int x = 0; x < steps; x++) output.add(CELLS.get(quad, grid, width, x, y));
     }
 
     private static void write(

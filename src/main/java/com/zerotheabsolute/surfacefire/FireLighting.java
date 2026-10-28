@@ -2,6 +2,7 @@ package com.zerotheabsolute.surfacefire;
 
 import com.zerotheabsolute.surfacefire.lighting.FireEmission;
 import com.zerotheabsolute.surfacefire.lighting.LightCluster;
+import com.zerotheabsolute.surfacefire.lighting.LightOcclusion;
 import com.zerotheabsolute.surfacefire.simulation.FireClocks;
 
 import it.unimi.dsi.fastutil.longs.Long2ByteMap;
@@ -33,6 +34,7 @@ public final class FireLighting {
     private final Long2ObjectOpenHashMap<com.zerotheabsolute.surfacefire.structure.BurningBlock>
             structures = new Long2ObjectOpenHashMap<>();
     private volatile Long2ByteMap emitted = Long2ByteMaps.EMPTY_MAP;
+    private LightOcclusion visibility;
     private final it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap<
                     com.zerotheabsolute.surfacefire.physics.FallingTimber>
             timber = new it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap<>();
@@ -151,7 +153,8 @@ public final class FireLighting {
             }
         }
         var desired = new Long2ByteOpenHashMap(clusters.size() * 8 + movingLights.size());
-        var visibility = new com.zerotheabsolute.surfacefire.lighting.LightOcclusion(level);
+        if (visibility == null) visibility = new LightOcclusion(level);
+        visibility.reset();
         var groupIterator = clusters.values().iterator();
         while (groupIterator.hasNext()) {
             var source = groupIterator.next().source();

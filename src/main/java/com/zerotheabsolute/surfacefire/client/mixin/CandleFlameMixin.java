@@ -45,6 +45,7 @@ public abstract class CandleFlameMixin {
             double dx,
             double dy,
             double dz) {
-        if (particle != ParticleTypes.SMALL_FLAME) level.addParticle(particle, x, y, z, dx, dy, dz);
+        if (particle != ParticleTypes.SMALL_FLAME && particle != ParticleTypes.SMOKE)
+            level.addParticle(particle, x, y, z, dx, dy, dz);
     }
 }

@@ -1,5 +1,6 @@
 package com.zerotheabsolute.surfacefire.client;
 
+import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import com.zerotheabsolute.surfacefire.torch.*;
@@ -15,6 +16,7 @@ import net.minecraft.world.level.block.WallTorchBlock;
 import net.minecraft.world.phys.Vec3;
 
 import org.joml.Matrix4f;
+import org.joml.Vector3f;
 
 import java.util.HashSet;
 import java.util.Set;
@@ -32,6 +34,8 @@ public final class TorchFlameRenderer {
     private static final int BEND_SEGMENTS = TorchPlume.SEGMENTS;
     private static final float MAX_TIP_BEND = .64f;
     private static final TorchPlume PLUME = new TorchPlume();
+    private static final Matrix4f INVERSE_ITEM_VIEW = new Matrix4f();
+    private static final Vector3f ITEM_RIGHT = new Vector3f(), ITEM_WIND = new Vector3f();
     private static final int MAX_VISIBLE_TORCHES = 4096;
     private static final double RENDER_DISTANCE_SQUARED = 64 * 64;
     private static final double[] WIND = new double[3];
@@ -74,6 +78,15 @@ public final class TorchFlameRenderer {
                     context == ItemDisplayContext.FIRST_PERSON_LEFT_HAND
                             || context == ItemDisplayContext.FIRST_PERSON_RIGHT_HAND;
             var airflow = firstPerson ? TorchAirflow.firstPerson() : TorchAirflow.worldItem();
+            INVERSE_ITEM_VIEW.set(RenderSystem.getModelViewMatrix()).invert();
+            INVERSE_ITEM_VIEW.transformDirection(ITEM_RIGHT.set(1, 0, 0)).normalize();
+            var camera = Minecraft.getInstance().gameRenderer.getMainCamera();
+            camera.rotation()
+                    .transformInverse(ITEM_WIND.set(airflow.x(), airflow.y(), airflow.z()));
+            INVERSE_ITEM_VIEW.transformDirection(ITEM_WIND);
+            airflow =
+                    new TorchAirflow.Bend(
+                            ITEM_WIND.x, ITEM_WIND.y, ITEM_WIND.z, airflow.strength());
             for (int pass = 0; pass < (ShaderPackRendering.active() ? 2 : 1); pass++) {
                 var vertices =
                         buffers.getBuffer(
@@ -110,6 +123,8 @@ public final class TorchFlameRenderer {
                             airflow,
                             false);
             }
+            TorchParticleSources.observe(
+                    matrix, context, firstPerson, FLAME_BASE_HEIGHT, FLAME_HEIGHT, airflow);
         } finally {
             poses.popPose();
         }
@@ -212,16 +227,28 @@ public final class TorchFlameRenderer {
             int row,
             float height) {
         float displacement = PLUME.bend[row] * bend;
+        float across = (2 * u - 1) * cameraWidth + PLUME.curl[row] * height;
         float vx =
                 m.m00() * x
                         + m.m10() * y
                         + m.m20() * z
                         + m.m30()
                         + airflow.x() * displacement
-                        + (2 * u - 1) * cameraWidth
-                        + PLUME.curl[row] * height;
-        float vy = m.m01() * x + m.m11() * y + m.m21() * z + m.m31() + airflow.y() * displacement;
-        float vz = m.m02() * x + m.m12() * y + m.m22() * z + m.m32() + airflow.z() * displacement;
+                        + ITEM_RIGHT.x * across;
+        float vy =
+                m.m01() * x
+                        + m.m11() * y
+                        + m.m21() * z
+                        + m.m31()
+                        + airflow.y() * displacement
+                        + ITEM_RIGHT.y * across;
+        float vz =
+                m.m02() * x
+                        + m.m12() * y
+                        + m.m22() * z
+                        + m.m32()
+                        + airflow.z() * displacement
+                        + ITEM_RIGHT.z * across;
         if (ShaderPackRendering.active()) {
             ShaderPackRendering.animatedVertex(
                     v, vx, vy, vz, u, w, ShaderPackRendering.frame(seed), 1);
@@ -258,6 +285,7 @@ public final class TorchFlameRenderer {
             }
             float seed = (Math.floorMod(pos.asLong(), 997) + 1) / 998f;
             wick(v, camera, right, x, y, z, FLAME_WIDTH, FLAME_HEIGHT, seed, wallFacing);
+            FireParticles.wick(x, y + FLAME_HEIGHT * .7, z, 1, pos.asLong(), 0, 0, 0);
         }
     }
 

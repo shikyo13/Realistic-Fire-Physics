@@ -10,8 +10,6 @@ import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
 
-import org.joml.Vector3f;
-
 /** Smoothed air motion relative to a moving torch, shared by its flame and fire audio. */
 @EventBusSubscriber(modid = SurfaceFire.MOD_ID, value = Dist.CLIENT)
 public final class TorchAirflow {
@@ -91,12 +89,13 @@ public final class TorchAirflow {
         return new Bend(x / divisor, y / divisor, z / divisor, Math.min(1, speed / divisor));
     }
 
+    static Entity source() {
+        return emitter;
+    }
+
     static Bend firstPerson() {
         var mc = Minecraft.getInstance();
-        var air = MOTION.sample(mc.getTimer().getGameTimeDeltaPartialTick(false));
-        var view = new Vector3f(air.x, air.y, air.z);
-        mc.gameRenderer.getMainCamera().rotation().transformInverse(view);
-        return new Bend(view.x, view.y, view.z, air.strength);
+        return MOTION.sample(mc.getTimer().getGameTimeDeltaPartialTick(false));
     }
 
     static float intensity() {

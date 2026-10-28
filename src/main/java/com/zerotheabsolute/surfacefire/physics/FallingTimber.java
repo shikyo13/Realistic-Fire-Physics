@@ -374,14 +374,26 @@ public final class FallingTimber extends Entity implements IEntityWithComplexSpa
 
     @Override
     public void writeSpawnData(RegistryFriendlyByteBuf buffer) {
-        var tag = new CompoundTag();
-        addAdditionalSaveData(tag);
-        buffer.writeNbt(tag);
+        TimberSpawnData.write(buffer, parts);
+        buffer.writeVarInt(age);
+        buffer.writeBoolean(quenched());
+        buffer.writeBoolean(burnMarksCleared());
+        buffer.writeQuaternion(new Quaternionf(motion.rotation));
     }
 
     @Override
     public void readSpawnData(RegistryFriendlyByteBuf buffer) {
-        var tag = buffer.readNbt();
-        if (tag != null) readAdditionalSaveData(tag);
+        parts = TimberSpawnData.read(buffer);
+        geometry();
+        age = Math.max(0, buffer.readVarInt());
+        entityData.set(BURN_AGE, age);
+        entityData.set(WET, buffer.readBoolean());
+        entityData.set(CLEARED, buffer.readBoolean());
+        visualRotation.set(buffer.readQuaternion()).normalize();
+        previousRotation.set(visualRotation);
+        entityData.set(ROTATION, new Quaternionf(visualRotation));
+        motion.rotation.set(visualRotation);
+        motion.position = position();
+        setPos(position());
     }
 }

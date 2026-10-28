@@ -28,6 +28,18 @@ public final class ShaderPackRendering extends RenderStateShard {
     private static MethodHandle enabled, shadows;
     private static boolean initialized;
 
+    private static final TransparencyStateShard CORE_TRANSPARENCY =
+            new TransparencyStateShard(
+                    "surfacefire_core_alpha",
+                    () -> {
+                        TRANSLUCENT_TRANSPARENCY.setupRenderState();
+                        ShaderPackFlameState.beginCore();
+                    },
+                    () -> {
+                        ShaderPackFlameState.endCore();
+                        TRANSLUCENT_TRANSPARENCY.clearRenderState();
+                    });
+
     public static final RenderType FLAME = emissive("flame");
     public static final RenderType SURFACE_FLAME = emissive("surface_flame");
     public static final RenderType SURFACE_FLAME_CORE = emissive("surface_flame", true);
@@ -59,6 +71,16 @@ public final class ShaderPackRendering extends RenderStateShard {
     private static ResourceLocation texture(String name) {
         return ResourceLocation.fromNamespaceAndPath(
                 SurfaceFire.MOD_ID, "textures/effect/" + name + ".png");
+    }
+
+    static void preloadTextures() {
+        ShaderPackBridge.preload();
+        ShaderPackFlameState.preload();
+        var textures = Minecraft.getInstance().getTextureManager();
+        for (var name :
+                new String[] {
+                    "flame", "surface_flame", "torch_flame", "smoke", "char", "dry", "heat", "ember"
+                }) textures.getTexture(texture(name));
     }
 
     private static RenderType translucent(String name) {
@@ -100,6 +122,12 @@ public final class ShaderPackRendering extends RenderStateShard {
     }
 
     private static RenderType emissive(String name, boolean depth, boolean sort) {
+        var transparency =
+                depth
+                        ? (name.equals("surface_flame")
+                                ? CORE_TRANSPARENCY
+                                : TRANSLUCENT_TRANSPARENCY)
+                        : LIGHTNING_TRANSPARENCY;
         return RenderType.create(
                 "surfacefire_pack_" + name + (depth ? "_core" : ""),
                 DefaultVertexFormat.NEW_ENTITY,
@@ -115,8 +143,7 @@ public final class ShaderPackRendering extends RenderStateShard {
                                                         GameRenderer.getRendertypeEyesShader(),
                                                         depth)))
                         .setTextureState(new TextureStateShard(texture(name), true, false))
-                        .setTransparencyState(
-                                depth ? TRANSLUCENT_TRANSPARENCY : LIGHTNING_TRANSPARENCY)
+                        .setTransparencyState(transparency)
                         .setDepthTestState(LEQUAL_DEPTH_TEST)
                         .setCullState(NO_CULL)
                         .setWriteMaskState(depth ? COLOR_DEPTH_WRITE : COLOR_WRITE)

@@ -36,6 +36,7 @@ public final class FireSettings {
     public static final ModConfigSpec.IntValue MAX_SAMPLES;
     public static final ModConfigSpec.IntValue SPREAD_WORK_PER_TICK;
     public static final ModConfigSpec.BooleanValue RAIN_EXTINGUISHES_TORCHES;
+    public static final ModConfigSpec.BooleanValue RAIN_EXTINGUISHES_CANDLES;
     public static final ModConfigSpec.BooleanValue LAVA_IGNITES;
     public static final ModConfigSpec.BooleanValue LIGHTNING_IGNITES;
     public static final ModConfigSpec.IntValue STRUCTURE_CELL_LIMIT;
@@ -60,6 +61,7 @@ public final class FireSettings {
                 builder.comment("Maximum queued propagation events processed each server tick.")
                         .defineInRange("spreadWorkPerTick", 2_048, 64, 8_192);
         RAIN_EXTINGUISHES_TORCHES = builder.define("rainExtinguishesTorches", true);
+        RAIN_EXTINGUISHES_CANDLES = builder.define("rainExtinguishesCandles", true);
         LAVA_IGNITES = builder.define("lavaIgnitesGround", true);
         LIGHTNING_IGNITES = builder.define("lightningIgnitesGround", true);
         STRUCTURE_CELL_LIMIT =
@@ -103,12 +105,12 @@ public final class FireSettings {
         MAX_FALLING_BODIES =
                 builder.comment(
                                 "Maximum moving log groups per dimension. Further support checks"
-                                    + " wait for capacity.")
+                                        + " wait for capacity.")
                         .defineInRange("maxFallingTimberBodies", 24, 1, 64);
         MAX_FALLING_LOGS =
                 builder.comment(
                                 "Maximum logs in one connected falling group. Larger structures"
-                                    + " remain static.")
+                                        + " remain static.")
                         .defineInRange("maxLogsPerFallingBody", 64, 1, 256);
         SPEC = builder.build();
     }

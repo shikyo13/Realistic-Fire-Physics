@@ -16,6 +16,7 @@ final class FlameGeometry {
             double y,
             double z,
             double width,
+            double depthScale,
             double height,
             Vec3 right,
             Vec3 up,
@@ -28,13 +29,21 @@ final class FlameGeometry {
         for (int slice = 0; slice < 3; slice++) {
             double a = slice / 3.0, b = (slice + 1) / 3.0;
             double ax =
-                    x + right.x * width * (a - .5) + depth.x * width * .22 * Math.sin(a * Math.PI);
+                    x
+                            + right.x * width * (a - .5)
+                            + depth.x * width * .22 * depthScale * Math.sin(a * Math.PI);
             double az =
-                    z + right.z * width * (a - .5) + depth.z * width * .22 * Math.sin(a * Math.PI);
+                    z
+                            + right.z * width * (a - .5)
+                            + depth.z * width * .22 * depthScale * Math.sin(a * Math.PI);
             double bx =
-                    x + right.x * width * (b - .5) + depth.x * width * .22 * Math.sin(b * Math.PI);
+                    x
+                            + right.x * width * (b - .5)
+                            + depth.x * width * .22 * depthScale * Math.sin(b * Math.PI);
             double bz =
-                    z + right.z * width * (b - .5) + depth.z * width * .22 * Math.sin(b * Math.PI);
+                    z
+                            + right.z * width * (b - .5)
+                            + depth.z * width * .22 * depthScale * Math.sin(b * Math.PI);
             vertex(
                     vertices, camera, textured, ax, y, az, (float) a, 0, frame, seed, alpha, false,
                     light);
@@ -77,7 +86,7 @@ final class FlameGeometry {
                 x,
                 y + .015,
                 z,
-                width * .72,
+                width * .72 * depthScale,
                 height * .88,
                 depth,
                 up,

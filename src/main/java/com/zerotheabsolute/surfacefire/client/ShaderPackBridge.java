@@ -15,6 +15,10 @@ final class ShaderPackBridge {
 
     private ShaderPackBridge() {}
 
+    static void preload() {
+        // Resolve the optional bridge during resource loading, before the first flame draw.
+    }
+
     static ShaderInstance emissive(ShaderInstance fallback, boolean depth) {
         return select(fallback, depth ? 1 : 0);
     }

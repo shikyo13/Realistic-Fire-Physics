@@ -8,6 +8,7 @@ final class FlameWave {
     private static final double BODY_WIDTH = .22, SHOULDER_WIDTH = .07, WIDTH_VARIATION = .06;
     private static final double SHAPE_PHASE_SPREAD = .47;
     private static final double TRAILING_HEIGHT = .18, SETTLING_DURATION = .48;
+    private static final double BAND_MEAN_THICKNESS = 1.05, BAND_THICKNESS_VARIATION = .08;
     private double broad, tip, crest;
 
     void update(double seconds, double x, double y, double z) {
@@ -51,6 +52,12 @@ final class FlameWave {
                         1);
         double fade = remaining * remaining * (3 - 2 * remaining);
         return TRAILING_HEIGHT + (1 - TRAILING_HEIGHT) * fade;
+    }
+
+    static double bandThickness(double x, double z) {
+        return BAND_MEAN_THICKNESS
+                + BAND_THICKNESS_VARIATION
+                        * (Math.sin(x * .63 + z * .38) * .7 + Math.sin(x * .28 - z * .57) * .3);
     }
 
     static float texturePhase(double x, double y, double z, float shape) {

@@ -1,16 +1,45 @@
 package com.zerotheabsolute.surfacefire.lighting;
 
+import it.unimi.dsi.fastutil.longs.Long2ByteOpenHashMap;
+
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.Level;
 
 /** Conservative voxel traversal for the extra samples of a bright, extended source. */
 public final class LightOcclusion implements LightCluster.Visibility {
     private static final int OPAQUE = 15, MAX_STEPS = 24;
-    private final Level level;
-    private final BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+    private static final int MAX_CACHED_BLOCKS = 16384;
+    private final Long2ByteOpenHashMap opacity = new Long2ByteOpenHashMap();
+    private final BlockTest blocks;
 
     public LightOcclusion(Level level) {
-        this.level = level;
+        var cursor = new BlockPos.MutableBlockPos();
+        blocks =
+                (x, y, z) -> {
+                    cursor.set(x, y, z);
+                    if (!level.hasChunkAt(cursor)) return true;
+                    var state = level.getBlockState(cursor);
+                    return state.getLightBlock(level, cursor) >= OPAQUE
+                            || !state.getFluidState().isEmpty();
+                };
+    }
+
+    LightOcclusion(BlockTest blocks) {
+        this.blocks = blocks;
+    }
+
+    /** Reuse storage, but never reuse visibility after terrain or fluids may have changed. */
+    public void reset() {
+        opacity.clear();
+    }
+
+    private boolean blocked(int x, int y, int z) {
+        long key = BlockPos.asLong(x, y, z);
+        byte cached = opacity.get(key);
+        if (cached != 0) return cached == 2;
+        boolean blocked = blocks.blocked(x, y, z);
+        if (opacity.size() < MAX_CACHED_BLOCKS) opacity.put(key, (byte) (blocked ? 2 : 1));
+        return blocked;
     }
 
     @Override
@@ -25,11 +54,7 @@ public final class LightOcclusion implements LightCluster.Visibility {
         double nextY = dy == 0 ? Double.POSITIVE_INFINITY : ((dy > 0 ? py + 1 : py) - y) / dy;
         double nextZ = dz == 0 ? Double.POSITIVE_INFINITY : ((dz > 0 ? pz + 1 : pz) - z) / dz;
         for (int i = 0; i < MAX_STEPS; i++) {
-            cursor.set(px, py, pz);
-            if (!level.hasChunkAt(cursor)) return false;
-            var state = level.getBlockState(cursor);
-            if (state.getLightBlock(level, cursor) >= OPAQUE || !state.getFluidState().isEmpty())
-                return false;
+            if (blocked(px, py, pz)) return false;
             if (px == tx && py == ty && pz == tz) return true;
             double next = Math.min(nextX, Math.min(nextY, nextZ));
             if (nextX <= next) {
@@ -46,5 +71,10 @@ public final class LightOcclusion implements LightCluster.Visibility {
             }
         }
         return false;
+    }
+
+    @FunctionalInterface
+    interface BlockTest {
+        boolean blocked(int x, int y, int z);
     }
 }

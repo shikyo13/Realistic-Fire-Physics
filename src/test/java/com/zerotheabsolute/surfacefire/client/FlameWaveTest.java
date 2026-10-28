@@ -75,4 +75,19 @@ class FlameWaveTest {
         assertEquals(1, FlameWave.vegetationEnvelope(.25, .5f));
         assertEquals(.18, FlameWave.vegetationEnvelope(1, .5f), .00001);
     }
+
+    @Test
+    void bandThicknessVariesSmoothlyAroundItsSmallAverageIncrease() {
+        double sum = 0, minimum = 2, maximum = 0;
+        for (int x = -100; x <= 100; x++)
+            for (int z = -100; z <= 100; z++) {
+                double value = FlameWave.bandThickness(x, z);
+                sum += value;
+                minimum = Math.min(minimum, value);
+                maximum = Math.max(maximum, value);
+                assertTrue(Math.abs(value - FlameWave.bandThickness(x + .125, z)) < .01);
+            }
+        assertEquals(1.05, sum / (201 * 201), .002);
+        assertTrue(minimum >= .97 && maximum <= 1.13 && maximum - minimum > .12);
+    }
 }

@@ -6,6 +6,7 @@ import com.zerotheabsolute.surfacefire.SurfaceFire;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.tags.FluidTags;
+import net.minecraft.world.level.block.AbstractCandleBlock;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.neoforged.bus.api.SubscribeEvent;
@@ -54,6 +55,7 @@ public final class TorchMigration {
                     s ->
                             s.is(Blocks.TORCH)
                                     || s.is(Blocks.WALL_TORCH)
+                                    || AbstractCandleBlock.isLit(s)
                                     || s.getFluidState().is(FluidTags.LAVA)
                                     || s.is(Blocks.CAMPFIRE)
                                     || s.is(Blocks.SOUL_CAMPFIRE))) {
@@ -89,6 +91,7 @@ public final class TorchMigration {
             var state = level.getBlockState(pos);
             if (state.is(Blocks.TORCH) || state.is(Blocks.WALL_TORCH))
                 level.setBlockAndUpdate(pos, TorchBlocks.managed(state, true));
+            else if (AbstractCandleBlock.isLit(state)) CandleWeather.observe(level, pos, state);
             else if (state.getFluidState().is(FluidTags.LAVA)
                     || state.is(Blocks.CAMPFIRE)
                     || state.is(Blocks.SOUL_CAMPFIRE)) IgnitionSources.observe(level, pos);

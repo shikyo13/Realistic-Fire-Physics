@@ -64,6 +64,15 @@ public final class CandleFlameRenderer {
                         FLAME_WIDTH,
                         FLAME_HEIGHT,
                         seed);
+                FireParticles.wick(
+                        pos.getX() + offset.x,
+                        pos.getY() + offset.y + FLAME_HEIGHT * .5,
+                        pos.getZ() + offset.z,
+                        .35,
+                        pos.asLong() ^ (149L * wick),
+                        0,
+                        0,
+                        0);
             }
         }
     }
