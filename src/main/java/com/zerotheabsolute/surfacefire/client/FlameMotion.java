@@ -23,7 +23,7 @@ final class FlameMotion {
     }
 
     double height(float seed, float heat) {
-        return (.8 + .35 * seed) * wave.height(heat, vigor) / Math.sqrt(1 + speed * speed * .015);
+        return (.62 + .58 * seed) * wave.height(heat, vigor) / Math.sqrt(1 + speed * speed * .015);
     }
 
     float brightness(float seed) {

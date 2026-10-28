@@ -18,7 +18,7 @@ void main() {
     vec2 flow=vec2(x*3.6+seed,y*4.8-time*7.8);
     float n=fbm(flow+vec2(fbm(flow*.75+4.0)*1.5,0));
     float envelope=1.0-pow(abs(x),.8)*(1.25+y*1.2)-y*.88;
-    float density=envelope+(n-.5)*mix(.45,.95,y);
+    float density=envelope+(n-.5)*mix(.75,1.10,y);
     float mask=smoothstep(-.02,.35,density)*smoothstep(1.0,.72,y)*smoothstep(0.0,RootSoftness,y);
     float core=smoothstep(.32,.88,density)*(1.0-y*.8);
     vec3 color=fireRadiance(core);

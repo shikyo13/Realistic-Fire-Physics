@@ -16,10 +16,10 @@ void main() {
     float x=(uv.x-.5+sway)*2.0;
     vec2 flow=vec2(x*3.2+seed,y*4.8-time*9.6);
     float n=fbm(flow+vec2(fbm(flow*.7+4.0)*1.4,0));
-    float envelope=1.10-pow(abs(x),1.25)*(1.22+y*.55)-y*.94;
+    float envelope=1.18-pow(abs(x),1.65)*(1.35+y*.65)-y*1.04;
     float density=envelope+(n-.5)*mix(.32,1.10,y);
-    float baseCurve=.13*(1.0-sqrt(max(0.0,1.0-(x/.90)*(x/.90))));
-    float roundedBase=smoothstep(-.012,.022,y-baseCurve);
+    float baseCurve=.24*(1.0-sqrt(max(0.0,1.0-(x/.88)*(x/.88))));
+    float roundedBase=smoothstep(-.008,.018,y-baseCurve);
     float mask=smoothstep(-.08,.23,density)*smoothstep(1.0,.76,y)*roundedBase;
     float core=smoothstep(.32,.88,density)*(1.0-y*.8);
     vec3 color=fireRadiance(core);

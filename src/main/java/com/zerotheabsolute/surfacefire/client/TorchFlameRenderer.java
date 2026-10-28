@@ -8,6 +8,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.resources.model.BakedModel;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.world.item.ItemDisplayContext;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.WallTorchBlock;
@@ -20,10 +21,14 @@ import java.util.Set;
 
 /** The flame follows the actual item model pose, including held and dropped-item transforms. */
 public final class TorchFlameRenderer {
-    // The yellow cap begins at eight pixels in the sixteen-pixel block model.
-    private static final float FLAME_BASE_HEIGHT = 8.0f / 16.0f;
-    private static final float FLAME_HEIGHT = 0.74f;
-    private static final float FLAME_WIDTH = 0.42f;
+    // The rounded bulb starts below the cap and reaches full width around the wick.
+    private static final float FLAME_BASE_HEIGHT = 6.5f / 16.0f;
+    private static final float FLAME_HEIGHT = 0.80f;
+    private static final float FLAME_WIDTH = 0.50f;
+    private static final double WALL_TILT = Math.toRadians(22.5);
+    private static final double WALL_WICK_OFFSET = .5 - (9.0 / 16) * Math.sin(WALL_TILT);
+    private static final double WALL_BASE_HEIGHT =
+            3.5 / 16 + FLAME_BASE_HEIGHT * Math.cos(WALL_TILT);
     private static final int BEND_SEGMENTS = TorchPlume.SEGMENTS;
     private static final float MAX_TIP_BEND = .64f;
     private static final TorchPlume PLUME = new TorchPlume();
@@ -144,7 +149,9 @@ public final class TorchFlameRenderer {
                     seed,
                     airflow,
                     bend,
-                    cameraWidth * PLUME.width[i], i, height * scale);
+                    cameraWidth * PLUME.width[i],
+                    i,
+                    height * scale);
             vertex(
                     v,
                     m,
@@ -156,7 +163,9 @@ public final class TorchFlameRenderer {
                     seed,
                     airflow,
                     bend,
-                    cameraWidth * PLUME.width[i], i, height * scale);
+                    cameraWidth * PLUME.width[i],
+                    i,
+                    height * scale);
             vertex(
                     v,
                     m,
@@ -168,7 +177,9 @@ public final class TorchFlameRenderer {
                     seed,
                     airflow,
                     bend,
-                    cameraWidth * PLUME.width[i + 1], i + 1, height * scale);
+                    cameraWidth * PLUME.width[i + 1],
+                    i + 1,
+                    height * scale);
             vertex(
                     v,
                     m,
@@ -180,7 +191,9 @@ public final class TorchFlameRenderer {
                     seed,
                     airflow,
                     bend,
-                    cameraWidth * PLUME.width[i + 1], i + 1, height * scale);
+                    cameraWidth * PLUME.width[i + 1],
+                    i + 1,
+                    height * scale);
         }
     }
 
@@ -195,7 +208,9 @@ public final class TorchFlameRenderer {
             float seed,
             TorchAirflow.Bend airflow,
             float bend,
-            float cameraWidth, int row, float height) {
+            float cameraWidth,
+            int row,
+            float height) {
         float displacement = PLUME.bend[row] * bend;
         float vx =
                 m.m00() * x
@@ -233,14 +248,16 @@ public final class TorchFlameRenderer {
             }
             if (!TorchBlocks.isLit(state)) continue;
             double x = pos.getX() + .5, y = pos.getY() + FLAME_BASE_HEIGHT, z = pos.getZ() + .5;
+            Direction wallFacing = null;
             if (state.hasProperty(WallTorchBlock.FACING)) {
-                var direction = state.getValue(WallTorchBlock.FACING).getOpposite();
-                x += direction.getStepX() * .27;
-                z += direction.getStepZ() * .27;
-                y += .22;
+                wallFacing = state.getValue(WallTorchBlock.FACING);
+                var direction = wallFacing.getOpposite();
+                x += direction.getStepX() * WALL_WICK_OFFSET;
+                z += direction.getStepZ() * WALL_WICK_OFFSET;
+                y = pos.getY() + WALL_BASE_HEIGHT;
             }
             float seed = (Math.floorMod(pos.asLong(), 997) + 1) / 998f;
-            wick(v, camera, right, x, y, z, FLAME_WIDTH, FLAME_HEIGHT, seed);
+            wick(v, camera, right, x, y, z, FLAME_WIDTH, FLAME_HEIGHT, seed, wallFacing);
         }
     }
 
@@ -254,9 +271,30 @@ public final class TorchFlameRenderer {
             double width,
             double height,
             float seed) {
+        wick(vertices, camera, right, x, y, z, width, height, seed, null);
+    }
+
+    private static void wick(
+            VertexConsumer vertices,
+            Vec3 camera,
+            Vec3 right,
+            double x,
+            double y,
+            double z,
+            double width,
+            double height,
+            float seed,
+            Direction wallFacing) {
         double dx = right.x * width * .5, dz = right.z * width * .5;
         double seconds = WorldAirflow.seconds();
         WorldAirflow.sample(seconds, x, y, z, WIND);
+        if (wallFacing != null) {
+            // Airflow slides along the support instead of pushing the plume through solid stone.
+            double inward =
+                    Math.min(0, WIND[0] * wallFacing.getStepX() + WIND[2] * wallFacing.getStepZ());
+            WIND[0] -= inward * wallFacing.getStepX();
+            WIND[2] -= inward * wallFacing.getStepZ();
+        }
         double riseSpeed = Math.sqrt(GRAVITY * height);
         double bx = Math.tanh(WIND[0] * 1.6 / riseSpeed) * height * WORLD_TIP_BEND;
         double bz = Math.tanh(WIND[2] * 1.6 / riseSpeed) * height * WORLD_TIP_BEND;
@@ -284,18 +322,30 @@ public final class TorchFlameRenderer {
             worldVertex(
                     vertices,
                     camera,
-                    x + dx * PLUME.width[i + 1] + bx * PLUME.bend[i + 1] + right.x * height * PLUME.curl[i + 1],
+                    x
+                            + dx * PLUME.width[i + 1]
+                            + bx * PLUME.bend[i + 1]
+                            + right.x * height * PLUME.curl[i + 1],
                     y + height * PLUME.rise[i + 1],
-                    z + dz * PLUME.width[i + 1] + bz * PLUME.bend[i + 1] + right.z * height * PLUME.curl[i + 1],
+                    z
+                            + dz * PLUME.width[i + 1]
+                            + bz * PLUME.bend[i + 1]
+                            + right.z * height * PLUME.curl[i + 1],
                     1,
                     top,
                     seed);
             worldVertex(
                     vertices,
                     camera,
-                    x - dx * PLUME.width[i + 1] + bx * PLUME.bend[i + 1] + right.x * height * PLUME.curl[i + 1],
+                    x
+                            - dx * PLUME.width[i + 1]
+                            + bx * PLUME.bend[i + 1]
+                            + right.x * height * PLUME.curl[i + 1],
                     y + height * PLUME.rise[i + 1],
-                    z - dz * PLUME.width[i + 1] + bz * PLUME.bend[i + 1] + right.z * height * PLUME.curl[i + 1],
+                    z
+                            - dz * PLUME.width[i + 1]
+                            + bz * PLUME.bend[i + 1]
+                            + right.z * height * PLUME.curl[i + 1],
                     0,
                     top,
                     seed);

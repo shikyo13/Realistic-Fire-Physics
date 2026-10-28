@@ -32,6 +32,10 @@ public final class FireClient {
     private static final Vec3 UP = new Vec3(0, 1, 0);
     private static final double DETAILED_EMBER_DISTANCE_SQUARED = 16 * 16;
     private static final int CHAR_SETTLE_TICKS = 8;
+    private static final double VEGETATION_POSITION_JITTER = .24;
+    private static final double GROUND_POSITION_JITTER = .10;
+    private static final double CROSS_FLAME_WIDTH = .65;
+    private static final double CROSS_FLAME_HEIGHT = .8;
     private static double cameraX, cameraY, cameraZ;
     private static Vec3 cameraPosition = Vec3.ZERO;
     private static long frame;
@@ -614,17 +618,25 @@ public final class FireClient {
                         || !tile.visible
                         || tile.distance > FireViewDistance.squared(mc)) continue;
                 float seed = noise(site.x(), site.z());
-                double x = (site.x() + seed) / 8.0,
-                        z = (site.z() + noise(site.z() + 13, site.x())) / 8.0;
+                boolean vegetation = s.fuel() == 2;
+                double jitter = vegetation ? VEGETATION_POSITION_JITTER : GROUND_POSITION_JITTER;
+                double x = (site.x() + .5) / 8.0 + (seed - .5) * jitter,
+                        z = (site.z() + .5) / 8.0 + (noise(site.z() + 13, site.x()) - .5) * jitter;
+                double envelope =
+                        vegetation
+                                ? FlameWave.vegetationEnvelope(
+                                        (burnTime - s.ignition()) / FireField.lifetime(s.fuel()),
+                                        seed)
+                                : 1;
                 double tall =
                         s.fuel() == 2
                                 ? tile.motion.vegetationHeight(seed)
                                 : .055 + Math.pow(seed, 2.8) * .36;
-                double height = tall * tile.motion.height(seed, heat) * (.4 + .6 * heat);
+                double height = tall * tile.motion.height(seed, heat) * (.4 + .6 * heat) * envelope;
                 float brightness = heat * tile.motion.brightness(seed);
                 double width =
                         s.fuel() == 2
-                                ? tile.motion.vegetationWidth(seed)
+                                ? tile.motion.vegetationWidth(seed) * (.7 + .3 * envelope)
                                 : .12 + .10 * noise(site.x() + 73, site.z());
                 billboard(
                         flames,
@@ -645,8 +657,8 @@ public final class FireClient {
                             x + .04,
                             site.y() + 1.014,
                             z - .03,
-                            width,
-                            height * .8,
+                            width * CROSS_FLAME_WIDTH,
+                            height * CROSS_FLAME_HEIGHT,
                             crossRight,
                             tile.motion.up(),
                             1 - seed,

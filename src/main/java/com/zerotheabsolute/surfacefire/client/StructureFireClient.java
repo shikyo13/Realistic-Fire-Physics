@@ -171,10 +171,10 @@ final class StructureFireClient {
                 int global = direction.get3DDataValue() * SurfaceCell.FACE_CELLS + index;
                 float seed = noise(block.pos.asLong() + global * 73428767L);
                 seeds[index] = seed;
-                double u = (index % GRID + .5) / GRID + .19 * (seed - .5);
+                double u = (index % GRID + 1.0) / GRID + .23 * (seed - .5);
                 double v =
-                        (index / GRID + .5) / GRID
-                                + .19 * (noise(global * 912931L + block.pos.asLong()) - .5);
+                        (index / GRID + 1.0) / GRID
+                                + .23 * (noise(global * 912931L + block.pos.asLong()) - .5);
                 anchors[index] =
                         new SurfaceCell(block.pos, direction, 0, 0)
                                 .point(Math.clamp(u, .02, .98), Math.clamp(v, .02, .98))
@@ -343,7 +343,6 @@ final class StructureFireClient {
                 for (int v = 0; v < GRID; v += 2)
                     for (int u = 0; u < GRID; u += 2) {
                         float strength = 0;
-                        int chosen = -1;
                         for (int dv = 0; dv < 2; dv++)
                             for (int du = 0; du < 2; du++) {
                                 int index =
@@ -352,13 +351,11 @@ final class StructureFireClient {
                                                 + u
                                                 + du;
                                 float heat = intensity(mesh.block, index, mesh.time);
-                                if (heat > strength) {
-                                    strength = heat;
-                                    chosen = index;
-                                }
+                                strength = Math.max(strength, heat);
                             }
                         if (strength < .01f) continue;
-                        int local = chosen % SurfaceCell.FACE_CELLS;
+                        // Keep the group's shape and root stable as its hottest cell changes.
+                        int local = v * GRID + u;
                         float seed = face.seeds[local];
                         var point = face.anchors[local];
                         double height =

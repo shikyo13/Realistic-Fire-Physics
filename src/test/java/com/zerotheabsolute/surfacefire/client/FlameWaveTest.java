@@ -32,8 +32,8 @@ class FlameWaveTest {
             if (frame > 0) assertTrue(Math.abs(brightness - previous) < .004);
             previous = brightness;
         }
-        float a = FlameWave.texturePhase(-16, 1, 3);
-        float b = FlameWave.texturePhase(-15.875, 1, 3);
+        float a = FlameWave.texturePhase(-16, 1, 3, .4f);
+        float b = FlameWave.texturePhase(-15.875, 1, 3, .4f);
         double delta = Math.abs(a - b);
         assertTrue(Math.min(delta, 1 - delta) < .005);
     }
@@ -48,9 +48,31 @@ class FlameWaveTest {
             low = Math.min(low, height);
             high = Math.max(high, height);
             if (frame > 0) assertTrue(Math.abs(height - previous) < .012);
-            assertTrue(wave.vegetationWidth(.5f) >= .30);
+            assertTrue(wave.vegetationWidth(.5f) >= .25);
             previous = height;
         }
         assertTrue(high > low * 2.5);
+    }
+
+    @Test
+    void localTextureDetailVariesWithoutChangingSharedMotion() {
+        float a = FlameWave.texturePhase(4, 1, 8, .1f);
+        float b = FlameWave.texturePhase(4.125, 1, 8, .9f);
+        double delta = Math.abs(a - b);
+        assertTrue(Math.min(delta, 1 - delta) > .3);
+        assertEquals(a, FlameWave.texturePhase(4, 1, 8, .1f));
+    }
+
+    @Test
+    void vegetationSettlesContinuouslyBehindTheFront() {
+        double previous = 1;
+        for (int step = 0; step <= 200; step++) {
+            double height = FlameWave.vegetationEnvelope(step / 200.0, .5f);
+            assertTrue(height <= previous && height >= .18);
+            assertTrue(previous - height < .014);
+            previous = height;
+        }
+        assertEquals(1, FlameWave.vegetationEnvelope(.25, .5f));
+        assertEquals(.18, FlameWave.vegetationEnvelope(1, .5f), .00001);
     }
 }

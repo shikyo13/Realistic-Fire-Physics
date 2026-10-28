@@ -25,14 +25,16 @@ final class FlameGeometry {
             int light) {
         double hx = right.x * width * .5, hy = right.y * width * .5, hz = right.z * width * .5;
         double tx = up.x * height, ty = up.y * height, tz = up.z * height;
-        if (!smoke) seed = FlameWave.texturePhase(x, y, z);
+        boolean mirrored = !smoke && seed < .5f;
+        float leftU = mirrored ? 1 : 0, rightU = 1 - leftU;
+        if (!smoke) seed = FlameWave.texturePhase(x, y, z, seed);
         int frame = textured ? ShaderPackRendering.frame(seed) : 0;
         vertex(
-                vertices, camera, textured, x - hx, y - hy, z - hz, 0, 0, frame, seed, alpha, smoke,
-                light);
+                vertices, camera, textured, x - hx, y - hy, z - hz, leftU, 0, frame, seed, alpha,
+                smoke, light);
         vertex(
-                vertices, camera, textured, x + hx, y + hy, z + hz, 1, 0, frame, seed, alpha, smoke,
-                light);
+                vertices, camera, textured, x + hx, y + hy, z + hz, rightU, 0, frame, seed, alpha,
+                smoke, light);
         vertex(
                 vertices,
                 camera,
@@ -40,7 +42,7 @@ final class FlameGeometry {
                 x + hx + tx,
                 y + hy + ty,
                 z + hz + tz,
-                1,
+                rightU,
                 1,
                 frame,
                 seed,
@@ -54,7 +56,7 @@ final class FlameGeometry {
                 x - hx + tx,
                 y - hy + ty,
                 z - hz + tz,
-                0,
+                leftU,
                 1,
                 frame,
                 seed,

@@ -5,7 +5,9 @@ final class FlameWave {
     private static final double BROAD_RATE = 9.2, SECONDARY_RATE = 5.1, TIP_RATE = 17.6;
     private static final double BODY_RATE = .9, BODY_SECONDARY_RATE = .66;
     private static final double BODY_FLOOR = .22, BODY_RANGE = .70, TONGUE_RANGE = .25;
-    private static final double BODY_WIDTH = .26, SHOULDER_WIDTH = .16, WIDTH_VARIATION = .08;
+    private static final double BODY_WIDTH = .22, SHOULDER_WIDTH = .07, WIDTH_VARIATION = .06;
+    private static final double SHAPE_PHASE_SPREAD = .47;
+    private static final double TRAILING_HEIGHT = .18, SETTLING_DURATION = .48;
     private double broad, tip, crest;
 
     void update(double seconds, double x, double y, double z) {
@@ -41,8 +43,19 @@ final class FlameWave {
         return BODY_WIDTH + SHOULDER_WIDTH * (1 - crest) + WIDTH_VARIATION * shape;
     }
 
-    static float texturePhase(double x, double y, double z) {
-        double phase = x * .035 + y * .0125 + z * .025;
+    static double vegetationEnvelope(double ageFraction, float shape) {
+        double remaining =
+                Math.clamp(
+                        (.28 + .08 * shape + SETTLING_DURATION - ageFraction) / SETTLING_DURATION,
+                        0,
+                        1);
+        double fade = remaining * remaining * (3 - 2 * remaining);
+        return TRAILING_HEIGHT + (1 - TRAILING_HEIGHT) * fade;
+    }
+
+    static float texturePhase(double x, double y, double z, float shape) {
+        // Motion is shared by the plume group; texture detail has a stable local time offset.
+        double phase = x * .035 + y * .0125 + z * .025 + shape * SHAPE_PHASE_SPREAD;
         return (float) (phase - Math.floor(phase));
     }
 }
