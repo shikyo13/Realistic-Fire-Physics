@@ -17,14 +17,19 @@ final class JoinedFlames {
     private static final double BUCKET = 1, LINK_DISTANCE = .95;
     private static final double LINK_DISTANCE_SQUARED = LINK_DISTANCE * LINK_DISTANCE;
     private static final double MAX_VERTICAL_STEP = .36, MAX_NEIGHBOR_ALIGNMENT = -.2;
-    private static final double MIN_JOIN_HEIGHT = .24, MAX_SPAN_HEIGHT_RATIO = 3;
+    private static final double MIN_JOIN_HEIGHT = .18, MAX_SPAN_HEIGHT_RATIO = 3;
     private static final int STRIPS = 6;
     private static final double COLUMN_RADIUS = .22, COLUMN_STEP = .68;
-    private static final double GROUND_DENSITY = 1.15;
+    private static final double ISOLATED_GROUND_DENSITY = 1.15;
+    private static final double CONNECTED_GROUND_DENSITY = 1.45;
+    private static final int BRIDGE_STRIPS = 3;
+    private static final float BRIDGE_HEAT = .90f;
     private final IntArrayList verticalOrder = new IntArrayList();
-    private static final float CONNECTION_OPACITY = .22f;
+    private static final float CONNECTION_OPACITY = .30f;
     private static final double CONNECTION_HEIGHT = .22;
+    private static final float CONNECTION_TEXTURE_INSET = .16f;
     private final ArrayList<Node> nodes = new ArrayList<>();
+    private final Node bridge = new Node();
     private final ArrayList<IntArrayList> buckets = new ArrayList<>();
     private final Long2ObjectOpenHashMap<IntArrayList> grid = new Long2ObjectOpenHashMap<>();
     private int size, usedBuckets;
@@ -227,7 +232,7 @@ final class JoinedFlames {
                         b.x,
                         b.y,
                         b.z,
-                        b.width * (b.vertical ? 1 : GROUND_DENSITY),
+                        b.width * ISOLATED_GROUND_DENSITY,
                         b.height,
                         right,
                         new Vec3(b.upX, 1, b.upZ),
@@ -251,7 +256,7 @@ final class JoinedFlames {
                     Math.min(
                             b.height * MAX_SPAN_HEIGHT_RATIO,
                             Math.max(b.width, a == null ? b.width : length * .9)
-                                    * (b.vertical ? 1 : GROUND_DENSITY));
+                                    * (b.vertical ? 1 : CONNECTED_GROUND_DENSITY));
             int frame = ShaderPackRendering.frame(FlameWave.texturePhase(b.x, b.y, b.z, b.seed));
             int rows = b.vertical ? 3 : 1;
             for (int row = 0; row < rows; row++) {
@@ -286,17 +291,39 @@ final class JoinedFlames {
         if (buffer instanceof MultiBufferSource.BufferSource batches) batches.endBatch(type);
     }
 
-    private static void connect(VertexConsumer vertex, Vec3 camera, Node a, Node b) {
+    private void connect(VertexConsumer vertex, Vec3 camera, Node a, Node b) {
         double height = Math.min(CONNECTION_HEIGHT, Math.min(a.height, b.height) * .4);
+        float textureRise = (float) (height / Math.min(a.height, b.height));
         float opacity = CONNECTION_OPACITY * Math.min(a.heat, b.heat);
         int frame =
                 ShaderPackRendering.frame(
                         FlameWave.texturePhase(
                                 (a.x + b.x) * .5, (a.y + b.y) * .5, (a.z + b.z) * .5, a.seed));
-        connectionVertex(vertex, camera, frame, a, 0, 0, opacity);
-        connectionVertex(vertex, camera, frame, b, 1, 0, opacity);
-        connectionVertex(vertex, camera, frame, b, 1, height, opacity);
-        connectionVertex(vertex, camera, frame, a, 0, height, opacity);
+        // Sample the flame's base instead of squeezing an entire flame into each low connection.
+        float left = CONNECTION_TEXTURE_INSET, right = 1 - CONNECTION_TEXTURE_INSET;
+        connectionVertex(vertex, camera, frame, a, left, 0, 0, opacity);
+        connectionVertex(vertex, camera, frame, b, right, 0, 0, opacity);
+        connectionVertex(vertex, camera, frame, b, right, textureRise, height, 0);
+        connectionVertex(vertex, camera, frame, a, left, textureRise, height, 0);
+        double dx = b.x - a.x, dz = b.z - a.z;
+        double distance = Math.sqrt(dx * dx + dz * dz);
+        bridge.x = (a.x + b.x) * .5;
+        bridge.y = (a.y + b.y) * .5;
+        bridge.z = (a.z + b.z) * .5;
+        bridge.seed = (a.seed + b.seed) * .5f;
+        bridge.height =
+                bridge.sourceHeight = Math.min(a.height, b.height) * (.58 + .26 * bridge.seed);
+        bridge.upX = (a.upX + b.upX) * .5;
+        bridge.upZ = (a.upZ + b.upZ) * .5;
+        bridge.heat = Math.min(a.heat, b.heat) * BRIDGE_HEAT;
+        double span = Math.min(distance * 1.15, bridge.height * MAX_SPAN_HEIGHT_RATIO);
+        for (int strip = 0; strip < BRIDGE_STRIPS; strip++) {
+            double u = strip / (double) BRIDGE_STRIPS, v = (strip + 1) / (double) BRIDGE_STRIPS;
+            emit(vertex, camera, frame, bridge, dx / distance, dz / distance, span, u, 0);
+            emit(vertex, camera, frame, bridge, dx / distance, dz / distance, span, v, 0);
+            emit(vertex, camera, frame, bridge, dx / distance, dz / distance, span, v, 1);
+            emit(vertex, camera, frame, bridge, dx / distance, dz / distance, span, u, 1);
+        }
     }
 
     private static void connectionVertex(
@@ -305,6 +332,7 @@ final class JoinedFlames {
             int frame,
             Node node,
             float u,
+            float v,
             double height,
             float opacity) {
         ShaderPackRendering.animatedVertex(
@@ -313,7 +341,7 @@ final class JoinedFlames {
                 (float) (node.y + height - camera.y),
                 (float) (node.z + node.upZ * height - camera.z),
                 u,
-                height == 0 ? 0 : 1,
+                v,
                 frame,
                 opacity);
     }

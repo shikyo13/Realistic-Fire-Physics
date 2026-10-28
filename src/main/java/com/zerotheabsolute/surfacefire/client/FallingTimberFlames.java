@@ -60,7 +60,7 @@ final class FallingTimberFlames {
     private static final class Mesh {
         final List<Source> sources = new ArrayList<>();
         final FlameMotion motion = new FlameMotion();
-        final Vector3f point = new Vector3f(), normal = new Vector3f();
+        final Vector3f point = new Vector3f();
         int previousAge = -1;
 
         Mesh(FallingTimber body) {
@@ -124,7 +124,6 @@ final class FallingTimberFlames {
 
     static void collect(RenderLevelStageEvent event, double now) {
         var level = Minecraft.getInstance().level;
-        var camera = event.getCamera().getPosition();
         float partial = event.getPartialTick().getGameTimeDeltaPartialTick(false);
         var entries = MESHES.entrySet().iterator();
         while (entries.hasNext()) {
@@ -150,8 +149,6 @@ final class FallingTimberFlames {
                 if (body.consumed(part)) continue;
                 float strength = source.heat + (source.nextHeat - source.heat) * partial;
                 if (strength <= .01f) continue;
-                var normal = source.face.getNormal();
-                rotation.transform(mesh.normal.set(normal.getX(), normal.getY(), normal.getZ()));
                 rotation.transform(
                         mesh.point.set(
                                 (float) source.point.x,
@@ -160,10 +157,8 @@ final class FallingTimberFlames {
                 double x = position.x + mesh.point.x,
                         y = position.y + mesh.point.y,
                         z = position.z + mesh.point.z;
-                if ((camera.x - x) * mesh.normal.x
-                                + (camera.y - y) * mesh.normal.y
-                                + (camera.z - z) * mesh.normal.z
-                        < -.1) continue;
+                // Flame volume rises beyond its source face; depth testing handles occlusion.
+                FireParticles.offer(x, y + .15, z, strength, strength);
                 double coverage =
                         source.coverage + (source.nextCoverage - source.coverage) * partial;
                 double fullness = .55 + .45 * Math.sqrt(coverage / (GROUP_WIDTH * GROUP_WIDTH));
@@ -178,7 +173,7 @@ final class FallingTimberFlames {
                         mesh.motion.up(),
                         source.seed,
                         strength * mesh.motion.brightness(source.seed),
-                        Math.abs(mesh.normal.y) < .7);
+                        source.face.getAxis() != Direction.Axis.Y);
             }
         }
     }

@@ -21,6 +21,7 @@ final class TimberLanding {
     static void settle(FallingTimber entity, ServerLevel level) {
         var occupied = new HashSet<BlockPos>();
         var parts = entity.parts();
+        var orientation = TimberSurfaceRotation.closest(entity.motion.rotation);
         // Logs reserve landing cells before foliage.
         for (int pass = 0; pass < 2; pass++)
             for (int i = 0; i < parts.size(); i++) {
@@ -40,16 +41,13 @@ final class TimberLanding {
                 BlockState state = part.state();
                 if (state.hasProperty(BlockStateProperties.AXIS)) {
                     var axis = state.getValue(BlockStateProperties.AXIS);
-                    Vec3 direction =
-                            entity.motion.rotate(
-                                    new Vec3(
-                                            axis == Direction.Axis.X ? 1 : 0,
-                                            axis == Direction.Axis.Y ? 1 : 0,
-                                            axis == Direction.Axis.Z ? 1 : 0));
                     state =
                             state.setValue(
                                     BlockStateProperties.AXIS,
-                                    Direction.getNearest(direction.x, direction.y, direction.z)
+                                    orientation
+                                            .apply(
+                                                    Direction.fromAxisAndDirection(
+                                                            axis, Direction.AxisDirection.POSITIVE))
                                             .getAxis());
                 }
                 if (state.hasProperty(BlockStateProperties.WATERLOGGED))
@@ -66,7 +64,7 @@ final class TimberLanding {
                                         level,
                                         position,
                                         state,
-                                        part,
+                                        part.rotated(orientation),
                                         entity.age(),
                                         entity.quenched());
                 }

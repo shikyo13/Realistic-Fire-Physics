@@ -59,6 +59,10 @@ public final class TimberBlocks {
         return ages[index];
     }
 
+    TimberBlocks rotated(TimberSurfaceRotation rotation) {
+        return new TimberBlocks(offset, state, rotation.ages(ages), quenched, outbreak);
+    }
+
     public boolean quenched() {
         return quenched;
     }

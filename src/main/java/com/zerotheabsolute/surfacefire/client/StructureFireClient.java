@@ -382,46 +382,16 @@ final class StructureFireClient {
         }
         buffer.endBatch(flameType);
         if (reflection) return;
-        RenderType smokeType = textured ? ShaderPackRendering.SMOKE : FireRenderTypes.SMOKE;
-        var smoke = buffer.getBuffer(smokeType);
-        if (!textured)
-            VISIBLE.sort(
-                    (a, b) ->
-                            Double.compare(
-                                    b.block.pos.distToCenterSqr(camera),
-                                    a.block.pos.distToCenterSqr(camera)));
-        Vec3 up = new Vec3(event.getCamera().getUpVector());
         for (var mesh : VISIBLE) {
             if (mesh.block.quenched || mesh.time >= mesh.block.coolAt()) continue;
             double age = (mesh.time - mesh.block.firstIgnition) / 20;
-            float seed = noise(mesh.block.pos.asLong());
-            for (int i = 0; i < 3; i++) {
-                double cycle = (age * .16 + i / 3.0 + seed) % 1;
-                float alpha =
-                        clamp(age / 2)
-                                * clamp((mesh.block.coolAt() - mesh.time) / 240)
-                                * clamp(cycle * 5)
-                                * clamp((1 - cycle) * 3)
-                                * .22f;
-                double size = .4 + cycle * 1.2;
-                FlameGeometry.billboard(
-                        smoke,
-                        camera,
-                        textured,
-                        mesh.block.pos.getX() + .5 + cycle * .4,
-                        mesh.block.pos.getY() + 1 + cycle * 2.7,
-                        mesh.block.pos.getZ() + .5,
-                        size,
-                        size,
-                        right,
-                        up,
-                        seed,
-                        alpha,
-                        true,
-                        mesh.light);
-            }
+            FireParticles.offer(
+                    mesh.block.pos.getX() + .5,
+                    mesh.block.pos.getY() + 1.08,
+                    mesh.block.pos.getZ() + .5,
+                    mesh.time < mesh.block.lastIgnition + mesh.block.fuel.flameTicks ? 1 : 0,
+                    clamp(age / 2) * clamp((mesh.block.coolAt() - mesh.time) / 240));
         }
-        buffer.endBatch(smokeType);
     }
 
     private static void quad(

@@ -129,6 +129,7 @@ public final class FireClient {
         }
         boolean reset = p.reset() || !dimension.equals(p.dimension());
         if (reset) {
+            FireParticles.clear();
             PlantBurnMasks.clear();
             GroundBurnMasks.clear();
             SAMPLES.clear();
@@ -255,6 +256,7 @@ public final class FireClient {
         VISIBLE_PLUMES.clear();
         JoinedFlames.WORLD.clear();
         FallingTimberFlames.clear();
+        FireParticles.clear();
         dimension = "";
         TorchFlameRenderer.clear();
         CandleFlameRenderer.clear();
@@ -544,6 +546,7 @@ public final class FireClient {
                         && !TorchFlameRenderer.hasPlaced()
                         && !CandleFlameRenderer.hasPlaced()
                         && !FallingTimberFlames.hasFire()
+                        && !FireParticles.hasParticles()
                         && !StructureFireClient.hasFire())
                 || FireRenderTypes.ground == null
                 || !dimension.equals(mc.level.dimension().location().toString())) return;
@@ -558,7 +561,6 @@ public final class FireClient {
                 reflectionPass
                         ? ShaderPackRendering.TORCH_CORE
                         : textured ? ShaderPackRendering.TORCH : FireRenderTypes.TORCH;
-        var smokeType = textured ? ShaderPackRendering.SMOKE : FireRenderTypes.SMOKE;
         var camera = e.getCamera().getPosition();
         double now =
                 mc.level.getGameTime()
@@ -600,6 +602,7 @@ public final class FireClient {
             else if (!textured) BUFFER.endBatch(groundType);
             Vec3 right = new Vec3(e.getCamera().getLeftVector()).scale(-1);
             Vec3 flatRight = new Vec3(right.x, 0, right.z).normalize();
+            FireParticles.begin(mc.level, camera, !reflectionPass);
             JoinedFlames.WORLD.clear();
             for (var tile : VISIBLE_PLUMES) tile.plumes.clear();
             VISIBLE_PLUMES.clear();
@@ -674,8 +677,7 @@ public final class FireClient {
             FallingTimberFlames.collect(e, now);
             JoinedFlames.WORLD.render(BUFFER, camera, flatRight, reflectionPass);
             if (reflectionPass) return;
-            var smoke = BUFFER.getBuffer(smokeType);
-            Vec3 up = new Vec3(e.getCamera().getUpVector());
+
             VISIBLE_SMOKE.clear();
             var smokeIterator = SMOKE_SITES.values().iterator();
             while (smokeIterator.hasNext()) {
@@ -691,51 +693,20 @@ public final class FireClient {
                         && tile.visible
                         && tile.distance <= 48 * 48) VISIBLE_SMOKE.add(s);
             }
-            // Shader packs sort on upload; the native renderer needs back-to-front sites here.
-            if (!textured)
-                VISIBLE_SMOKE.sort(Comparator.comparingDouble(s -> -smokeDistance(s, camera)));
             for (var s : VISIBLE_SMOKE) {
-                double age = (FireClocks.get(mc.level).time(s.block(), now) - s.ignition()) / 20.0;
-                var tile = TILES.get(s.block());
-                if (tile == null || !tile.visible || tile.distance > FireViewDistance.squared(mc))
-                    continue;
-                float seed = noise(s.site().x(), s.site().z());
-                for (int i = 0; i < 4; i++) {
-                    double cycle = (age * .21 + i * .25 + seed) % 1;
-                    double size = .45 + cycle * 1.25;
-                    float alpha =
-                            clamp(age / 2)
-                                    * clamp((26 - age) / 20)
-                                    * clamp(cycle * 5)
-                                    * clamp((1 - cycle) * 3)
-                                    * .27f;
-                    billboard(
-                            smoke,
-                            (s.site().x() + .5) / 8.0 + cycle * .5,
-                            s.site().y() + 1.1 + cycle * 2.6,
-                            (s.site().z() + .5) / 8.0 + Math.sin(seed * 10 + cycle) * .22,
-                            size,
-                            size,
-                            right,
-                            up,
-                            seed,
-                            alpha,
-                            true,
-                            tile.light);
-                }
+                double burnTime = FireClocks.get(mc.level).time(s.block(), now);
+                double age = (burnTime - s.ignition()) / 20.0;
+                FireParticles.offer(
+                        (s.site().x() + .5) / 8.0,
+                        s.site().y() + 1.12,
+                        (s.site().z() + .5) / 8.0,
+                        heat(s, burnTime),
+                        clamp(age / 2) * clamp((26 - age) / 20));
             }
-            BUFFER.endBatch(smokeType);
+            FireParticles.render(e, BUFFER);
         } finally {
             modelView.popMatrix();
             RenderSystem.applyModelViewMatrix();
         }
-    }
-
-    private static double smokeDistance(FirePacket.Sample sample, Vec3 camera) {
-        var site = sample.site();
-        double x = Math.floorDiv(site.x(), 8) + .5 - camera.x;
-        double y = site.y() + .5 - camera.y;
-        double z = Math.floorDiv(site.z(), 8) + .5 - camera.z;
-        return x * x + y * y + z * z;
     }
 }

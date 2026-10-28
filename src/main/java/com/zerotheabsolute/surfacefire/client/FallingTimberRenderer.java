@@ -24,7 +24,7 @@ import java.util.*;
 
 /** Cached block meshes share the body's transform; flames remain buoyant in world space. */
 public final class FallingTimberRenderer extends EntityRenderer<FallingTimber> {
-    private final Map<FallingTimber, List<List<BakedQuad>>> meshes = new WeakHashMap<>();
+    private static final Map<FallingTimber, List<List<BakedQuad>>> MESHES = new WeakHashMap<>();
 
     public FallingTimberRenderer(EntityRendererProvider.Context context) {
         super(context);
@@ -36,6 +36,14 @@ public final class FallingTimberRenderer extends EntityRenderer<FallingTimber> {
             value = Dist.CLIENT,
             bus = EventBusSubscriber.Bus.MOD)
     public static final class Registration {
+        @SubscribeEvent
+        public static void reload(
+                net.neoforged.neoforge.client.event.RegisterClientReloadListenersEvent event) {
+            event.registerReloadListener(
+                    (net.minecraft.server.packs.resources.ResourceManagerReloadListener)
+                            resources -> MESHES.clear());
+        }
+
         @SubscribeEvent
         public static void register(EntityRenderersEvent.RegisterRenderers event) {
             event.registerEntityRenderer(
@@ -71,7 +79,7 @@ public final class FallingTimberRenderer extends EntityRenderer<FallingTimber> {
             MultiBufferSource buffer,
             int light) {
         var rotation = entity.rotation(partial);
-        var cached = meshes.computeIfAbsent(entity, this::mesh);
+        var cached = MESHES.computeIfAbsent(entity, this::mesh);
         var material =
                 buffer.getBuffer(RenderType.entityCutoutNoCull(TextureAtlas.LOCATION_BLOCKS));
         pose.pushPose();
