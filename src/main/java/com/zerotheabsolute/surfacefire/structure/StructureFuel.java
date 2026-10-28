@@ -10,7 +10,7 @@ import net.minecraft.world.level.block.state.BlockState;
 
 /** Combustion rates are independent of rendering and of any moving-body implementation. */
 public enum StructureFuel {
-    WOOD(160, 360, 3, 6),
+    WOOD(240, 400, 3, 6),
     LEAVES(65, 130, 2, 4),
     LIGHT(95, 180, 2, 5);
     public final int flameTicks, consumeTicks, minimumStepTicks, stepVariation;

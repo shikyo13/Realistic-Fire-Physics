@@ -64,7 +64,7 @@ class TimberStorageTest {
         ages[0] = -1;
         assertEquals(20, part.ageAt(0));
         assertTrue(part.burning(100));
-        assertFalse(part.burning(160));
-        assertTrue(part.consumed(360));
+        assertFalse(part.burning(240));
+        assertTrue(part.consumed(400));
     }
 }

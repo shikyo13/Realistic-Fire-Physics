@@ -39,6 +39,7 @@ public final class StructureField extends SavedData {
             new Factory<>(StructureField::new, StructureField::load);
     private static final int[][] STEPS = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
     private static final int MINIMUM_CONSUMED_CELLS = 48;
+    private static final double LOG_SUPPORT_FAILURE_FRACTION = .7;
 
     private record Pending(SurfaceCell source, BurningBlock origin, long due) {}
 
@@ -212,10 +213,13 @@ public final class StructureField extends SavedData {
         peakSteps = Math.max(peakSteps, lastSteps);
         if (now % FireSettings.STRUCTURE_ENVIRONMENT_TICKS == 0) updateBlocks(level, now);
         cleanHistory(level, now);
-        if (now % 2 == 0 && !changes.isEmpty()) {
-            for (var player : level.players()) send(player, false, changes);
-            changes.clear();
-        }
+        if (now % 2 == 0) flushChanges(level);
+    }
+
+    public void flushChanges(ServerLevel level) {
+        if (changes.isEmpty()) return;
+        for (var player : level.players()) send(player, false, changes);
+        changes.clear();
     }
 
     private void updateBlocks(ServerLevel level, long now) {
@@ -253,7 +257,9 @@ public final class StructureField extends SavedData {
                             && block.state.is(net.minecraft.tags.BlockTags.LOGS_THAT_BURN)
                             && block.count >= 128;
             int failureTicks =
-                    weakenedLog ? block.fuel.consumeTicks * 3 / 5 : block.fuel.consumeTicks;
+                    weakenedLog
+                            ? (int) (block.fuel.consumeTicks * LOG_SUPPORT_FAILURE_FRACTION)
+                            : block.fuel.consumeTicks;
             if (local >= block.firstIgnition + failureTicks
                     && block.count >= MINIMUM_CONSUMED_CELLS) {
                 consumed.add(block);

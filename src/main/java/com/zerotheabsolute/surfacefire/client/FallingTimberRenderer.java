@@ -14,22 +14,17 @@ import net.minecraft.client.renderer.texture.TextureAtlas;
 import net.minecraft.core.Direction;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.RandomSource;
-import net.minecraft.world.phys.Vec3;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.neoforge.client.event.EntityRenderersEvent;
 import net.neoforged.neoforge.client.model.data.ModelData;
 
-import org.joml.Vector3f;
-
 import java.util.*;
 
 /** Cached block meshes share the body's transform; flames remain buoyant in world space. */
 public final class FallingTimberRenderer extends EntityRenderer<FallingTimber> {
     private final Map<FallingTimber, List<List<BakedQuad>>> meshes = new WeakHashMap<>();
-    private final FlameMotion flame = new FlameMotion();
-    private final JoinedFlames movingFlames = new JoinedFlames();
 
     public FallingTimberRenderer(EntityRendererProvider.Context context) {
         super(context);
@@ -113,42 +108,7 @@ public final class FallingTimberRenderer extends EntityRenderer<FallingTimber> {
             pose.popPose();
         }
         pose.popPose();
-        if (entity.quenched() || ShaderPackRendering.shadowPass()) return;
-        var mc = Minecraft.getInstance();
-        var camera = mc.gameRenderer.getMainCamera();
-        Vec3 position = entity.getPosition(partial);
-        Vec3 right = new Vec3(camera.getLeftVector()).scale(-1);
-        right = new Vec3(right.x, 0, right.z).normalize();
-        flame.update(
-                (entity.level().getGameTime() + partial) / 20, position.x, position.y, position.z);
-        movingFlames.clear();
-        for (int i = 0; i < entity.parts().size(); i++) {
-            var part = entity.parts().get(i);
-            if (!part.burning(entity.age()) || entity.consumed(part)) continue;
-            var offset = entity.offset(i);
-            for (int j = 0; j < 4; j++) {
-                double angle = j * Math.PI * .5;
-                var local =
-                        new Vector3f(
-                                (float) (offset.x + Math.cos(angle) * .5),
-                                (float) offset.y,
-                                (float) (offset.z + Math.sin(angle) * .5));
-                rotation.transform(local);
-                Vec3 root = position.add(local.x, local.y, local.z);
-                float seed = ((i * 37 + j * 17) % 101) / 101f;
-                movingFlames.add(
-                        root.x,
-                        root.y - .3,
-                        root.z,
-                        .55,
-                        .9 * flame.height(seed, 1),
-                        flame.up(),
-                        seed,
-                        flame.brightness(seed),
-                        true);
-            }
-        }
-        movingFlames.render(buffer, camera.getPosition(), right, false);
+        FallingTimberFlames.observe(entity);
     }
 
     @Override

@@ -37,7 +37,7 @@ public final class FallingTimber extends Entity implements IEntityWithComplexSpa
     private static final int SUBSTEPS = 6, REST_TICKS = 16, MAX_FLIGHT_TICKS = 600;
     private static final int CONTACT_INTERVAL = 5;
     private static final int MAX_SETTLING_CONTACT_TICKS = 50;
-    private static final double INITIAL_ANGULAR_SPEED = .035;
+    private static final double INITIAL_ANGULAR_SPEED = .023;
     private static final double LANDING_LINEAR_DAMPING = .82, LANDING_ANGULAR_DAMPING = .72;
     public final TimberDynamics motion = new TimberDynamics();
     private final TimberCollision collision = new TimberCollision();

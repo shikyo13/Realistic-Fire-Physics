@@ -71,6 +71,8 @@ final class TimberLanding {
                                         entity.quenched());
                 }
             }
+        // Deliver the restored flame clocks before removing the moving representation.
+        StructureField.get(level).flushChanges(level);
         entity.discard();
     }
 

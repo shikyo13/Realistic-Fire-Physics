@@ -254,6 +254,7 @@ public final class FireClient {
         VISIBLE_SMOKE.clear();
         VISIBLE_PLUMES.clear();
         JoinedFlames.WORLD.clear();
+        FallingTimberFlames.clear();
         dimension = "";
         TorchFlameRenderer.clear();
         CandleFlameRenderer.clear();
@@ -542,6 +543,7 @@ public final class FireClient {
                 || (SAMPLES.isEmpty()
                         && !TorchFlameRenderer.hasPlaced()
                         && !CandleFlameRenderer.hasPlaced()
+                        && !FallingTimberFlames.hasFire()
                         && !StructureFireClient.hasFire())
                 || FireRenderTypes.ground == null
                 || !dimension.equals(mc.level.dimension().location().toString())) return;
@@ -669,6 +671,7 @@ public final class FireClient {
             CandleFlameRenderer.render(BUFFER.getBuffer(torchType), camera, flatRight);
             BUFFER.endBatch(torchType);
             StructureFireClient.render(e, BUFFER, now, reflectionPass, glowPass, textured);
+            FallingTimberFlames.collect(e, now);
             JoinedFlames.WORLD.render(BUFFER, camera, flatRight, reflectionPass);
             if (reflectionPass) return;
             var smoke = BUFFER.getBuffer(smokeType);

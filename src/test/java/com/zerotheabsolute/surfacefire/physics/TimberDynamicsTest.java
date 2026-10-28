@@ -32,8 +32,8 @@ class TimberDynamicsTest {
         var body = new TimberDynamics();
         body.position = new Vec3(0, 10, 0);
         for (int i = 0; i < 60; i++) body.integrate(1.0 / 6);
-        assertTrue(body.position.y < 8.1);
-        assertTrue(body.velocity.y < -.39);
+        assertEquals(-9.81 * .5 / 20, body.velocity.y, 1e-8);
+        assertEquals(10 - .5 * 9.81 * .5 * .5, body.position.y, .025);
         assertEquals(0, body.angularVelocity.length(), 1e-8);
     }
 

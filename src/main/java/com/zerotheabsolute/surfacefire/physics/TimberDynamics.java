@@ -7,9 +7,10 @@ import org.joml.Vector3d;
 
 /** Fixed-step rigid-body motion. Velocities use blocks and radians per Minecraft tick. */
 public final class TimberDynamics {
-    public static final double GRAVITY = .04;
+    private static final double TICKS_PER_SECOND = 20;
+    public static final double GRAVITY = 9.81 / (TICKS_PER_SECOND * TICKS_PER_SECOND);
     public static final double MAX_SPEED = .8;
-    private static final double MAX_ANGULAR_SPEED = .09;
+    private static final double MAX_ANGULAR_SPEED = .065;
     private static final double RESTITUTION = .08;
     private static final double FRICTION = .58;
     private static final double CONTACT_SLOP = .0002;
