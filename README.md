@@ -51,4 +51,4 @@ Operator commands:
 
 ## Build
 
-Run `./gradlew build` with Java 21. The distributable is `build/libs/realistic-fire-physics-0.1.0.jar`.
+Run `./gradlew build` with Java 21. The distributable is `build/libs/realistic-fire-physics-0.1.1.jar`.
