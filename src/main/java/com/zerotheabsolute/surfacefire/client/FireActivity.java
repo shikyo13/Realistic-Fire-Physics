@@ -2,42 +2,27 @@ package com.zerotheabsolute.surfacefire.client;
 
 /** Fixed spatial bins share nearby combustion between flame motion and a bounded sound pool. */
 final class FireActivity {
-    static final int VOICES = 3;
     static final int CELL_SIZE = 8, RADIUS = 12, WIDTH = RADIUS * 2 + 1;
     private static final int CAPACITY = WIDTH * WIDTH * WIDTH;
-    private static final double AUDIBLE_RANGE_SQUARED = 64 * 64;
-    private static final double GROUP_RANGE_SQUARED = 18 * 18;
-    private final float[] mass = new float[CAPACITY], wood = new float[CAPACITY];
-    private final double[] x = new double[CAPACITY],
-            y = new double[CAPACITY],
-            z = new double[CAPACITY];
+    private final float[] mass = new float[CAPACITY];
     private final int[] occupied = new int[CAPACITY];
-    private final boolean[] selected = new boolean[CAPACITY];
-    final Emitter[] emitters = {new Emitter(), new Emitter(), new Emitter()};
+    private final FireSoundField sounds = new FireSoundField();
+    final FireSoundField.Emitter[] emitters = sounds.emitters;
     private int count, originX, originY, originZ;
-    private double listenerX, listenerY, listenerZ;
-
-    static final class Emitter {
-        double x, y, z;
-        float energy, wood;
-    }
 
     void clear() {
-        for (int i = 0; i < count; i++) {
-            int at = occupied[i];
-            mass[at] = wood[at] = 0;
-            x[at] = y[at] = z[at] = 0;
-            selected[at] = false;
-        }
+        resetBins();
+        sounds.clear();
+    }
+
+    private void resetBins() {
+        for (int i = 0; i < count; i++) mass[occupied[i]] = 0;
         count = 0;
-        for (var emitter : emitters) emitter.energy = 0;
     }
 
     void begin(double px, double py, double pz) {
-        clear();
-        listenerX = px;
-        listenerY = py;
-        listenerZ = pz;
+        resetBins();
+        sounds.begin(px, py, pz);
         originX = cell(px) - RADIUS;
         originY = cell(py) - RADIUS;
         originZ = cell(pz) - RADIUS;
@@ -64,10 +49,7 @@ final class FireActivity {
         if (at < 0) return;
         if (mass[at] == 0) occupied[count++] = at;
         mass[at] += energy;
-        wood[at] += energy * (Float.isFinite(woodFraction) ? Math.clamp(woodFraction, 0, 1) : 0);
-        x[at] += px * energy;
-        y[at] += py * energy;
-        z[at] += pz * energy;
+        sounds.add(px, py, pz, energy, woodFraction);
     }
 
     float intensity(double px, double py, double pz) {
@@ -84,46 +66,11 @@ final class FireActivity {
         return nearby / (8 + nearby);
     }
 
+    void addSound(double px, double py, double pz, float energy, float woodFraction) {
+        sounds.add(px, py, pz, energy, woodFraction);
+    }
+
     void finish() {
-        for (var emitter : emitters) {
-            int best = -1;
-            double score = 0;
-            for (int i = 0; i < count; i++) {
-                int at = occupied[i];
-                if (selected[at]) continue;
-                double dx = x[at] / mass[at] - listenerX;
-                double dy = y[at] / mass[at] - listenerY;
-                double dz = z[at] / mass[at] - listenerZ;
-                double distance = dx * dx + dy * dy + dz * dz;
-                double candidate = mass[at] / (64 + distance);
-                if (distance <= AUDIBLE_RANGE_SQUARED && candidate > score) {
-                    score = candidate;
-                    best = at;
-                }
-            }
-            if (best < 0) continue;
-            double cx = x[best] / mass[best], cy = y[best] / mass[best], cz = z[best] / mass[best];
-            double sx = 0, sy = 0, sz = 0;
-            float energy = 0, timber = 0;
-            for (int i = 0; i < count; i++) {
-                int at = occupied[i];
-                if (selected[at]) continue;
-                double dx = x[at] / mass[at] - cx,
-                        dy = y[at] / mass[at] - cy,
-                        dz = z[at] / mass[at] - cz;
-                if (dx * dx + dy * dy + dz * dz > GROUP_RANGE_SQUARED) continue;
-                selected[at] = true;
-                energy += mass[at];
-                timber += wood[at];
-                sx += x[at];
-                sy += y[at];
-                sz += z[at];
-            }
-            emitter.x = sx / energy;
-            emitter.y = sy / energy;
-            emitter.z = sz / energy;
-            emitter.energy = energy;
-            emitter.wood = timber / energy;
-        }
+        sounds.finish();
     }
 }

@@ -18,6 +18,7 @@ import net.minecraft.sounds.SoundSource;
 import net.minecraft.util.RandomSource;
 import net.minecraft.util.valueproviders.ConstantFloat;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.entity.HumanoidArm;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
@@ -30,7 +31,6 @@ import java.util.concurrent.CompletableFuture;
 @EventBusSubscriber(modid = SurfaceFire.MOD_ID, value = Dist.CLIENT)
 public final class TorchAudio {
     private static final float FADE = .2f;
-    private static final float BURN_VOLUME = .3234f;
     private static Loop burn;
 
     private TorchAudio() {}
@@ -77,6 +77,7 @@ public final class TorchAudio {
     private static final class Loop extends AbstractTickableSoundInstance {
         private final LocalPlayer owner;
         private final Level level;
+        private final double[] wick = new double[3];
         private volatile CombustionState controls = CombustionState.SILENT;
 
         Loop(LocalPlayer owner) {
@@ -85,10 +86,11 @@ public final class TorchAudio {
             level = owner.level();
             looping = true;
             delay = 0;
-            relative = true;
-            attenuation = Attenuation.NONE;
+            relative = false;
+            attenuation = Attenuation.LINEAR;
             volume = 0;
             pitch = 1;
+            position();
         }
 
         @Override
@@ -103,7 +105,7 @@ public final class TorchAudio {
                             Sound.Type.FILE,
                             true,
                             false,
-                            16);
+                            TorchAcoustics.AUDIBLE_DISTANCE);
             return event;
         }
 
@@ -119,6 +121,16 @@ public final class TorchAudio {
             return true;
         }
 
+        private void position() {
+            boolean right = owner.getMainArm() == HumanoidArm.RIGHT;
+            if (!TorchState.isLit(owner.getMainHandItem())) right = !right;
+            TorchAcoustics.heldPosition(owner.getX(), owner.getEyeY(), owner.getZ(),
+                    owner.getYRot(), owner.getXRot(), right, wick);
+            x = wick[0];
+            y = wick[1];
+            z = wick[2];
+        }
+
         @Override
         public void tick() {
             boolean valid =
@@ -129,7 +141,13 @@ public final class TorchAudio {
                     valid
                             ? new CombustionState(1, 1, 0, TorchAirflow.speed(), .55f)
                             : CombustionState.SILENT;
-            float target = valid ? BURN_VOLUME : 0;
+            float target = 0;
+            if (valid) {
+                position();
+                var listener = Minecraft.getInstance().gameRenderer.getMainCamera().getPosition();
+                target = TorchAcoustics.BURN_VOLUME
+                        * TorchAcoustics.distanceGain(Math.sqrt(listener.distanceToSqr(x, y, z)));
+            }
             volume += (target - volume) * FADE;
             if (!valid && volume < .001f) stop();
         }

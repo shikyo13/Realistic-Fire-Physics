@@ -8,6 +8,7 @@ A fire overhaul for Minecraft Java 1.21.1 with spreading flames, glowing embers,
 - Burning surfaces glow and char. Ground continues to smolder after the flames subside, then cools. Burn marks persist when the world is saved and reopened.
 - Jump onto burning ground to stamp out small patches. Partially burned grass and ferns retain their scorched appearance.
 - Flames bend with local gusts, and held or dropped torch flames trail their movement. Torch sound responds to airflow, with gentle crackling at rest and stronger flutter in motion.
+- Fire sounds follow their sources, including thrown torches and falling timber, and fade with distance. Throwing a torch produces a brief rush of flame as it flies away.
 - Burning trunks and branches lose support, fall with their attached canopy, and settle into the terrain. Falling wood keeps burning and can ignite nearby fuel; water extinguishes it.
 - Larger fires move in rolling groups of flames and produce a fuller roar as nearby vegetation and wood burn.
 - A dropped torch gradually dries and ignites the grass beneath it. Picking it up or wetting the ground interrupts ignition.

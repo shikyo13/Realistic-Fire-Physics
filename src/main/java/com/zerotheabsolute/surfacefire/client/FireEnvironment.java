@@ -32,9 +32,11 @@ public final class FireEnvironment {
         if (mc.level == null || mc.player == null || mc.isPaused()) return;
         if (remaining-- > 0) return;
         remaining = UPDATE_TICKS - 1;
-        ACTIVITY.begin(mc.player.getX(), mc.player.getEyeY(), mc.player.getZ());
+        var listener = mc.gameRenderer.getMainCamera().getPosition();
+        ACTIVITY.begin(listener.x, listener.y, listener.z);
         FireClient.collectActivity(ACTIVITY);
         StructureFireClient.collectActivity(ACTIVITY);
+        TimberAudioSources.collect(mc.level, ACTIVITY);
         ACTIVITY.finish();
     }
 

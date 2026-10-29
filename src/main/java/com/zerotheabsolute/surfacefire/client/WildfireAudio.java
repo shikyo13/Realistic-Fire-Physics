@@ -29,8 +29,7 @@ import java.util.concurrent.CompletableFuture;
 @EventBusSubscriber(modid = SurfaceFire.MOD_ID, value = Dist.CLIENT)
 public final class WildfireAudio {
     private static final float MIN_ENERGY = .02f, MAX_VOLUME = .95f, FADE = .25f;
-    private static final int AUDIBLE_DISTANCE = 64;
-    private static final Loop[] LOOPS = new Loop[FireActivity.VOICES];
+    private static final Loop[] LOOPS = new Loop[FireSoundField.VOICES];
 
     private WildfireAudio() {}
 
@@ -105,7 +104,7 @@ public final class WildfireAudio {
                             Sound.Type.FILE,
                             true,
                             false,
-                            AUDIBLE_DISTANCE);
+                            FireSoundField.AUDIBLE_DISTANCE);
             return event;
         }
 
@@ -128,9 +127,9 @@ public final class WildfireAudio {
             boolean valid = level == Minecraft.getInstance().level && source.energy > MIN_ENERGY;
             float target = 0;
             if (valid) {
-                x += (source.x - x) * .15;
-                y += (source.y - y) * .15;
-                z += (source.z - z) * .15;
+                x = source.x;
+                y = source.y;
+                z = source.z;
                 WorldAirflow.sample(WorldAirflow.seconds(), x, y, z, wind);
                 float power = source.energy / (12 + source.energy);
                 float air = (float) Math.sqrt(wind[0] * wind[0] + wind[2] * wind[2]);
@@ -138,7 +137,10 @@ public final class WildfireAudio {
                         new CombustionState(
                                 1, .25f + .75f * power, 0, air + 1 + 4 * power, source.wood);
                 float area = (float) Math.sqrt(source.energy);
-                target = MAX_VOLUME * area / (2 + area);
+                var listener = Minecraft.getInstance().gameRenderer.getMainCamera().getPosition();
+                double distance = Math.sqrt(listener.distanceToSqr(x, y, z));
+                target = MAX_VOLUME * area / (2 + area)
+                        * FireAcoustics.distanceGain(distance, source.energy);
             } else controls = CombustionState.SILENT;
             volume += (target - volume) * FADE;
             if (!valid && volume < .001f) stop();

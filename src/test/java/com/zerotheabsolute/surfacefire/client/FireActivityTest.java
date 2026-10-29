@@ -9,12 +9,12 @@ class FireActivityTest {
     void nearbyFrontsShareOneEmitterAndConserveCombustion() {
         var field = new FireActivity();
         field.begin(0, 2, 0);
-        field.add(-.5, 1, -.5, 2, 1);
-        field.add(7.5, 1, .5, 3, 0);
+        field.add(8, 1, .5, 2, 1);
+        field.add(12, 1, .5, 3, 0);
         field.finish();
         assertEquals(5, field.emitters[0].energy);
         assertEquals(.4, field.emitters[0].wood, .0001);
-        assertEquals(4.3, field.emitters[0].x, .0001);
+        assertEquals(8, field.emitters[0].x, .0001);
         assertEquals(0, field.emitters[1].energy);
     }
 
