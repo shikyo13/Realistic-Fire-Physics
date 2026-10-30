@@ -381,6 +381,7 @@ public final class FireField extends SavedData {
     private void spread(ServerLevel level, long now) {
         if (level.getGameRules().getBoolean(GameRules.RULE_DOFIRETICK)) {
             frontier.prepare(clocks::clock);
+            java.util.function.Predicate<BlockPos> fuel = pos -> probe(level, pos).fuel > 0;
             for (int budget = 0; budget < FireSettings.SPREAD_WORK_PER_TICK.get(); budget++) {
                 var p = frontier.poll(now);
                 if (p == null) break;
@@ -391,13 +392,9 @@ public final class FireField extends SavedData {
                         || source != p.origin
                         || probe(level, p.source.block()).fuel == 0
                         || probe(level, p.source.block()).rain) continue;
-                if (p.site.x != p.source.x
-                        && p.site.z != p.source.z
-                        && (probe(level, new Site(p.site.x, p.site.y, p.source.z).block()).fuel == 0
-                                || probe(level, new Site(p.source.x, p.site.y, p.site.z).block())
-                                                .fuel
-                                        == 0)) continue;
-                if (!probe(level, p.site.block()).rain) ignite(level, p.site, source.outbreak());
+                var target = GroundFirePath.next(p.source, p.site, fuel);
+                if (target != null && !probe(level, target.block()).rain)
+                    ignite(level, target, source.outbreak());
             }
         } else {
             frontier.clear();
