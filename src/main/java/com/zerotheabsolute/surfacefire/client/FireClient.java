@@ -3,6 +3,7 @@ package com.zerotheabsolute.surfacefire.client;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.*;
 import com.zerotheabsolute.surfacefire.*;
+import com.zerotheabsolute.surfacefire.client.mesh.UniformQuadGrid;
 import com.zerotheabsolute.surfacefire.simulation.FireClocks;
 
 import net.minecraft.client.Minecraft;
@@ -30,6 +31,8 @@ public final class FireClient {
     private static final List<Tile> VISIBLE_PLUMES = new ArrayList<>();
     private static final ShaderPackRendering.GroundLayer[] GROUND_LAYERS =
             ShaderPackRendering.GroundLayer.values();
+    private static final UniformQuadGrid HEAT_QUADS =
+            new UniformQuadGrid(FireSettings.CELLS_PER_BLOCK);
     private static final Vec3 UP = new Vec3(0, 1, 0);
     private static final double DETAILED_EMBER_DISTANCE_SQUARED = 16 * 16;
     private static final int CHAR_SETTLE_TICKS = 8;
@@ -57,6 +60,7 @@ public final class FireClient {
                             resources -> {
                                 ShaderPackRendering.preloadTextures();
                                 FlameSortScratch.clear();
+                                JoinedFlames.WORLD.release();
                             });
         }
 
@@ -189,6 +193,7 @@ public final class FireClient {
                 if (tile == null) continue;
                 var origin = CORNERS.get(site);
                 tile.quads.removeIf(quad -> quad.a == origin);
+                tile.cells[cellIndex(site)] = null;
                 if (tile.quads.isEmpty()) TILES.remove(tile.pos);
             }
         for (int dx = -1; dx <= 2; dx++)
@@ -225,19 +230,26 @@ public final class FireClient {
             }
     }
 
+    private static int cellIndex(FireField.Site site) {
+        int width = FireSettings.CELLS_PER_BLOCK;
+        return Math.floorMod(site.z(), width) * width + Math.floorMod(site.x(), width);
+    }
+
     private static void addMesh(FireField.Site source) {
         for (int dx = -1; dx <= 1; dx++)
             for (int dz = -1; dz <= 1; dz++) {
                 var site = source.offset(dx, dz);
-                if (MESH.add(site))
-                    TILES.computeIfAbsent(site.block(), Tile::new)
-                            .quads
-                            .add(
-                                    new GroundQuad(
-                                            corner(site),
-                                            corner(site.offset(0, 1)),
-                                            corner(site.offset(1, 1)),
-                                            corner(site.offset(1, 0))));
+                if (MESH.add(site)) {
+                    var tile = TILES.computeIfAbsent(site.block(), Tile::new);
+                    var quad =
+                            new GroundQuad(
+                                    corner(site),
+                                    corner(site.offset(0, 1)),
+                                    corner(site.offset(1, 1)),
+                                    corner(site.offset(1, 0)));
+                    tile.quads.add(quad);
+                    tile.cells[cellIndex(site)] = quad;
+                }
             }
     }
 
@@ -263,7 +275,7 @@ public final class FireClient {
         FLAME_SITES.clear();
         VISIBLE_SMOKE.clear();
         VISIBLE_PLUMES.clear();
-        JoinedFlames.WORLD.clear();
+        JoinedFlames.WORLD.release();
         FallingTimberFlames.clear();
         FireParticles.clear();
         TorchParticleSources.clear();
@@ -324,6 +336,8 @@ public final class FireClient {
         final BlockPos pos;
         final AABB bounds;
         final List<GroundQuad> quads = new ArrayList<>();
+        final GroundQuad[] cells =
+                new GroundQuad[FireSettings.CELLS_PER_BLOCK * FireSettings.CELLS_PER_BLOCK];
         final GroundQuad fullQuad;
         boolean coverageChecked, fullCoverage;
         long coverageSettlesAt;
@@ -463,8 +477,10 @@ public final class FireClient {
             var vertices = BUFFER.getBuffer(layer.type);
             for (var tile : TILES.values()) {
                 if (!tile.visible || !tile.hasLayer(layer, tile.time)) continue;
-                if (layer == ShaderPackRendering.GroundLayer.HEAT
-                        && drawUniformHeat(vertices, tile, now)) continue;
+                if (layer == ShaderPackRendering.GroundLayer.HEAT) {
+                    drawHeat(vertices, tile, now);
+                    continue;
+                }
                 if (layer == ShaderPackRendering.GroundLayer.EMBER
                         && tile.distance > DETAILED_EMBER_DISTANCE_SQUARED) {
                     tile.settleCoverage(now);
@@ -484,21 +500,41 @@ public final class FireClient {
         }
     }
 
-    private static boolean drawUniformHeat(VertexConsumer vertices, Tile tile, double now) {
-        if (tile.quads.size() != 64) return false;
+    private static void drawHeat(VertexConsumer vertices, Tile tile, double now) {
         var layer = ShaderPackRendering.GroundLayer.HEAT;
-        float alpha = tile.fullQuad.a.alpha(layer, now);
-        for (int i = 0; i < tile.quads.size(); i++) {
-            var quad = tile.quads.get(i);
-            if (quad.a.alpha(layer, now) != alpha
-                    || quad.b.alpha(layer, now) != alpha
-                    || quad.c.alpha(layer, now) != alpha
-                    || quad.d.alpha(layer, now) != alpha) return false;
+        HEAT_QUADS.clear();
+        for (int i = 0; i < tile.cells.length; i++) {
+            var quad = tile.cells[i];
+            if (quad != null)
+                HEAT_QUADS.set(
+                        i,
+                        quad.a.alpha(layer, now),
+                        quad.b.alpha(layer, now),
+                        quad.c.alpha(layer, now),
+                        quad.d.alpha(layer, now));
         }
-        // The flat surface and world-space UVs are unchanged. Only identical heat colors merge;
-        // moving boundaries and spatially flickering embers retain their original subdivisions.
-        drawGroundQuad(vertices, tile.fullQuad, layer, now);
-        return true;
+        while (HEAT_QUADS.next()) {
+            int first = HEAT_QUADS.first(), last = HEAT_QUADS.last();
+            if (first == last) {
+                drawGroundQuad(vertices, tile.cells[first], layer, now);
+                continue;
+            }
+            float alpha = HEAT_QUADS.color();
+            if (alpha * 4 < .005f) continue;
+            int width = FireSettings.CELLS_PER_BLOCK;
+            drawGroundCorner(vertices, tile.cells[first].a, alpha, LightTexture.FULL_BRIGHT);
+            drawGroundCorner(
+                    vertices,
+                    tile.cells[last / width * width + first % width].b,
+                    alpha,
+                    LightTexture.FULL_BRIGHT);
+            drawGroundCorner(vertices, tile.cells[last].c, alpha, LightTexture.FULL_BRIGHT);
+            drawGroundCorner(
+                    vertices,
+                    tile.cells[first / width * width + last % width].d,
+                    alpha,
+                    LightTexture.FULL_BRIGHT);
+        }
     }
 
     private static void drawGroundQuad(
@@ -706,7 +742,7 @@ public final class FireClient {
             BUFFER.endBatch(torchType);
             StructureFireClient.render(e, BUFFER, now, reflectionPass, glowPass, textured);
             FallingTimberFlames.collect(e, now, !glowPass);
-            JoinedFlames.WORLD.render(BUFFER, camera, flatRight, reflectionPass);
+            JoinedFlames.WORLD.render(camera, flatRight, reflectionPass, glowPass);
             if (reflectionPass) return;
 
             VISIBLE_SMOKE.clear();

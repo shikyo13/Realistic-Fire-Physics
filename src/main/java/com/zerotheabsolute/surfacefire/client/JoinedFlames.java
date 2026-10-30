@@ -5,7 +5,6 @@ import com.mojang.blaze3d.vertex.VertexConsumer;
 import it.unimi.dsi.fastutil.ints.IntArrayList;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 
-import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.phys.Vec3;
 
@@ -35,6 +34,7 @@ final class JoinedFlames {
     private final Long2ObjectOpenHashMap<IntArrayList> grid = new Long2ObjectOpenHashMap<>();
     private int size, usedBuckets;
     private boolean linked;
+    private final FlameFrameMesh frameMesh = new FlameFrameMesh();
 
     private static final class Node {
         double x, y, z, width, sourceWidth, height, sourceHeight, upX, upZ;
@@ -222,13 +222,37 @@ final class JoinedFlames {
         return result;
     }
 
-    void render(MultiBufferSource buffer, Vec3 camera, Vec3 right, boolean reflection) {
-        link();
+    void release() {
+        clear();
+        frameMesh.close();
+        nodes.clear();
+        nodes.trimToSize();
+        buckets.clear();
+        buckets.trimToSize();
+        verticalOrder.clear();
+        verticalOrder.trim();
+        grid.trim();
+    }
+
+    void render(Vec3 camera, Vec3 right, boolean reflection, boolean reuseFrame) {
+        if (size == 0) {
+            frameMesh.close();
+            return;
+        }
         var type =
                 reflection
                         ? ShaderPackRendering.SURFACE_FLAME_CORE
                         : ShaderPackRendering.SURFACE_FLAME;
-        var vertices = buffer.getBuffer(type);
+        if (!reuseFrame) {
+            link();
+            var builder = frameMesh.begin(type);
+            emitFlames(builder, camera, right);
+            frameMesh.upload(builder, type);
+        }
+        frameMesh.draw(type);
+    }
+
+    private void emitFlames(VertexConsumer vertices, Vec3 camera, Vec3 right) {
         for (int i = 0; i < size; i++) {
             var b = nodes.get(i);
             if (b.merged) continue;
@@ -297,15 +321,6 @@ final class JoinedFlames {
                         b.heat * (float) (.65 - facing),
                         false,
                         net.minecraft.client.renderer.LightTexture.FULL_BRIGHT);
-        }
-        if (buffer instanceof MultiBufferSource.BufferSource batches) {
-            // BufferSource consumes the sort state during this call; its centers do not escape.
-            FlameSortScratch.begin();
-            try {
-                batches.endBatch(type);
-            } finally {
-                FlameSortScratch.end();
-            }
         }
     }
 
