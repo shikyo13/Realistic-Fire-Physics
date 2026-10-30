@@ -32,6 +32,7 @@ public final class SurfaceFire {
         com.zerotheabsolute.surfacefire.torch.TorchBlocks.BLOCKS.register(modBus);
         com.zerotheabsolute.surfacefire.audio.FireSounds.SOUNDS.register(modBus);
         com.zerotheabsolute.surfacefire.physics.TimberEntities.TYPES.register(modBus);
+        com.zerotheabsolute.surfacefire.embers.Embers.TYPES.register(modBus);
         modBus.addListener(FirePacket::register);
         modBus.addListener(FireClockPacket::register);
         modBus.addListener(StructurePacket::register);

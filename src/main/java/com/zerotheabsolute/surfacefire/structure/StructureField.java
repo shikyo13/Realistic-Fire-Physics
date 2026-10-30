@@ -8,6 +8,9 @@ import com.zerotheabsolute.surfacefire.FireSettings;
 import com.zerotheabsolute.surfacefire.HistoryCleanup;
 import com.zerotheabsolute.surfacefire.simulation.ChunkFireQueue;
 import com.zerotheabsolute.surfacefire.simulation.FireClocks;
+import com.zerotheabsolute.surfacefire.simulation.RisingHeat;
+import com.zerotheabsolute.surfacefire.simulation.SpreadTiming;
+import com.zerotheabsolute.surfacefire.wind.SpreadWind;
 
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
@@ -41,12 +44,30 @@ public final class StructureField extends SavedData {
     private static final int MINIMUM_CONSUMED_CELLS = 48;
     private static final double LOG_SUPPORT_FAILURE_FRACTION = .7;
 
-    private record Pending(SurfaceCell source, BurningBlock origin, long due) {}
+    private static final class Pending {
+        final SurfaceCell source;
+        final BurningBlock origin;
+        final long start;
+        final int delays;
+        int remaining = SpreadTiming.ALL_STEPS;
+        long due;
+
+        Pending(SurfaceCell source, BurningBlock origin, long start, int delays) {
+            this.source = source;
+            this.origin = origin;
+            this.start = start;
+            this.delays = delays;
+            due = start + SpreadTiming.next(delays, remaining);
+        }
+    }
 
     private final Long2ObjectOpenHashMap<BurningBlock> blocks = new Long2ObjectOpenHashMap<>();
     private final LongOpenHashSet active = new LongOpenHashSet();
     private final ChunkFireQueue<Pending> frontier =
-            new ChunkFireQueue<>(p -> ChunkPos.asLong(p.source.block()), Pending::due);
+            new ChunkFireQueue<>(p -> ChunkPos.asLong(p.source.block()), p -> p.due);
+    private final SpreadWind wind = new SpreadWind();
+    private final CanopyHeat heat = new CanopyHeat();
+    private final HeatAccess heatAccess = new HeatAccess();
     private FireClocks clocks;
     private final List<StructurePacket.Change> changes = new ArrayList<>();
     private StructureTerrain terrain;
@@ -121,22 +142,40 @@ public final class StructureField extends SavedData {
         if (active.add(cell.block().asLong())) clocks.heated(block.pos);
         changes.add(change(block, cell.index()));
         FireLighting.get(level).acceptStructure(block);
-        schedule(cell, block.fuel, local);
+        schedule(level, cell, block.fuel, local);
         setDirty();
         return true;
     }
 
-    private void schedule(SurfaceCell cell, StructureFuel fuel, long now) {
+    private void schedule(ServerLevel level, SurfaceCell cell, StructureFuel fuel, long now) {
         long hash = cell.block().asLong() * 73428767L + cell.index() * 912931L;
         hash ^= hash >>> 23;
-        frontier.add(
-                new Pending(
-                        cell,
-                        blocks.get(cell.block().asLong()),
-                        now
-                                + FireSettings.spreadDelay(
-                                        fuel.minimumStepTicks
-                                                + Math.floorMod(hash, fuel.stepVariation))));
+        double wx = 0, wz = 0;
+        if (FireSettings.WIND_DRIVEN_SPREAD.get()) {
+            BlockPos pos = cell.block();
+            int slot =
+                    wind.sample(
+                            pos.asLong(), pos.getX(), pos.getY(), pos.getZ(), level.getGameTime());
+            int exposed = terrain(level).probe(pos).exposed();
+            wx = SpreadWind.exposedWind(wind.x(slot), exposed, Direction.WEST, Direction.EAST);
+            wz = SpreadWind.exposedWind(wind.z(slot), exposed, Direction.NORTH, Direction.SOUTH);
+        }
+        int delays = 0;
+        double base = fuel.minimumStepTicks + Math.floorMod(hash, fuel.stepVariation);
+        var axis = cell.face().getAxis();
+        for (int i = 0; i < STEPS.length; i++) {
+            int du = STEPS[i][0], dv = STEPS[i][1];
+            int dx = axis == Direction.Axis.X ? 0 : du;
+            int dy = axis == Direction.Axis.Y ? 0 : dv;
+            int dz = axis == Direction.Axis.X ? du : axis == Direction.Axis.Y ? dv : 0;
+            delays =
+                    SpreadTiming.put(
+                            delays,
+                            i,
+                            SpreadTiming.delay(
+                                    base, FireSettings.SPREAD_SPEED.get(), wx, wz, dx, dy, dz));
+        }
+        frontier.add(new Pending(cell, blocks.get(cell.block().asLong()), now, delays));
     }
 
     public boolean igniteFrom(ServerLevel level, BlockPos block, Vec3 source) {
@@ -157,6 +196,8 @@ public final class StructureField extends SavedData {
         }
         if (terrain(level).burnable(ground.above()))
             igniteFrom(level, ground.above(), source, owner);
+        if (FireSettings.RISING_HEAT.get() || FireSettings.EMBER_IGNITION.get())
+            heat.offer(ground, true);
     }
 
     public void tick(ServerLevel level) {
@@ -185,6 +226,7 @@ public final class StructureField extends SavedData {
                 for (int i = 0; i < block.ignition.length; i++)
                     if (block.burning(i, clocks.time(block.pos, now)))
                         schedule(
+                                level,
                                 SurfaceCell.fromIndex(block.pos, i),
                                 block.fuel,
                                 clocks.time(block.pos, now));
@@ -204,14 +246,32 @@ public final class StructureField extends SavedData {
                     continue;
                 var probe = access.probe(source.pos);
                 if (probe.wet() || !source.matches(probe.state())) continue;
-                for (var step : STEPS) {
+                int ready =
+                        SpreadTiming.ready(
+                                pending.delays,
+                                pending.remaining,
+                                clocks.time(source.pos, now) - pending.start);
+                for (int index = 0; index < STEPS.length; index++) {
+                    if ((ready & (1 << index)) == 0) continue;
+                    var step = STEPS[index];
                     var next = pending.source.next(step[0], step[1], access);
                     if (next != null) ignite(level, next, source.outbreak);
+                }
+                pending.remaining &= ~ready;
+                if (pending.remaining != 0) {
+                    pending.due =
+                            pending.start + SpreadTiming.next(pending.delays, pending.remaining);
+                    frontier.add(pending);
                 }
             }
         } else frontier.clear();
         peakSteps = Math.max(peakSteps, lastSteps);
         if (now % FireSettings.STRUCTURE_ENVIRONMENT_TICKS == 0) updateBlocks(level, now);
+        if ((FireSettings.RISING_HEAT.get() || FireSettings.EMBER_IGNITION.get())
+                && level.getGameRules().getBoolean(GameRules.RULE_DOFIRETICK)) {
+            heatAccess.level = level;
+            heat.tick(this::transferHeat);
+        } else heat.clear();
         cleanHistory(level, now);
         if (now % 2 == 0) flushChanges(level);
     }
@@ -220,6 +280,82 @@ public final class StructureField extends SavedData {
         if (changes.isEmpty()) return;
         for (var player : level.players()) send(player, false, changes);
         changes.clear();
+    }
+
+    private int transferHeat(BlockPos pos, boolean ground) {
+        var level = heatAccess.level;
+        if (!FireClocks.ticking(level, ChunkPos.asLong(pos))) return 1;
+        CanopyHeat.Emitter emitter;
+        if (ground) emitter = FireField.get(level).heatEmitter(level, pos);
+        else {
+            var block = blocks.get(pos.asLong());
+            var probe = terrain(level).probe(pos);
+            long local = clocks.time(pos, level.getGameTime());
+            if (block == null || probe.wet() || !block.matches(probe.state())) return 1;
+            var face = block.heatFace(local);
+            if (face == null || !terrain.exposed(pos, face)) return 1;
+            var point =
+                    new SurfaceCell(pos, face, 4, 4)
+                            .center()
+                            .add(Vec3.atLowerCornerOf(face.getNormal()).scale(.08));
+            int height =
+                    Math.min(
+                            block.fuel == StructureFuel.LEAVES ? 3 : 5,
+                            1 + (int) ((local - block.firstIgnition) / CanopyHeat.RISE_TICKS));
+            emitter =
+                    new CanopyHeat.Emitter(pos, point.x, point.y, point.z, height, block.outbreak);
+        }
+        if (emitter == null) return 1;
+        com.zerotheabsolute.surfacefire.embers.Embers.offer(level, emitter);
+        if (!FireSettings.RISING_HEAT.get()) return 1;
+        double wx = 0, wz = 0;
+        if (FireSettings.WIND_DRIVEN_SPREAD.get()) {
+            int slot =
+                    wind.sample(
+                            pos.asLong(), pos.getX(), pos.getY(), pos.getZ(), level.getGameTime());
+            wx = wind.x(slot);
+            wz = wind.z(slot);
+        }
+        heatAccess.emitter = emitter;
+        return RisingHeat.trace(
+                emitter.x(), emitter.y(), emitter.z(), wx, wz, emitter.height(), heatAccess);
+    }
+
+    private final class HeatAccess implements RisingHeat.Access {
+        ServerLevel level;
+        CanopyHeat.Emitter emitter;
+        private final BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+
+        public int inspect(int x, int y, int z) {
+            cursor.set(x, y, z);
+            if (!FireClocks.ticking(level, ChunkPos.asLong(cursor))
+                    || cursor.equals(emitter.origin())) return RisingHeat.BLOCKED;
+            var probe = terrain.probe(cursor);
+            if (probe.state() == null || probe.wet()) return RisingHeat.BLOCKED;
+            if (probe.fuel() != null) return RisingHeat.FUEL;
+            return probe.state().getCollisionShape(level, cursor).isEmpty()
+                    ? RisingHeat.OPEN
+                    : RisingHeat.BLOCKED;
+        }
+
+        public void ignite(int x, int y, int z, double fromX, double fromY, double fromZ) {
+            var target = new BlockPos(x, y, z);
+            var source = new Vec3(fromX, fromY, fromZ);
+            var delta = source.subtract(Vec3.atCenterOf(target));
+            var face = Direction.getNearest(delta.x, delta.y, delta.z);
+            if (!terrain.exposed(target, face)) return;
+            var cell = SurfaceCell.at(target, face, source);
+            for (int u = 0; u < 2; u++)
+                for (int v = 0; v < 2; v++)
+                    StructureField.this.ignite(
+                            level,
+                            new SurfaceCell(
+                                    target,
+                                    face,
+                                    Math.min(7, cell.u() + u),
+                                    Math.min(7, cell.v() + v)),
+                            emitter.owner());
+        }
     }
 
     private void updateBlocks(ServerLevel level, long now) {
@@ -252,6 +388,9 @@ public final class StructureField extends SavedData {
                 setDirty();
                 continue;
             }
+            if ((FireSettings.RISING_HEAT.get() || FireSettings.EMBER_IGNITION.get())
+                    && (now / FireSettings.STRUCTURE_ENVIRONMENT_TICKS + key) % 2 == 0
+                    && block.heatFace(local) != null) heat.offer(block.pos, false);
             boolean weakenedLog =
                     FireSettings.FALLING_LOGS.get()
                             && block.state.is(net.minecraft.tags.BlockTags.LOGS_THAT_BURN)
@@ -301,6 +440,7 @@ public final class StructureField extends SavedData {
     private void remove(ServerLevel level, BurningBlock block) {
         if (blocks.remove(block.pos.asLong()) == null) return;
         historyCleanup.removed(block.pos.asLong());
+        heat.remove(block.pos);
         clocks.release(block.pos);
         changes.add(change(block, StructurePacket.REMOVE));
         FireLighting.get(level).removeStructure(block.pos.asLong());
@@ -391,7 +531,8 @@ public final class StructureField extends SavedData {
                 + lastSteps
                 + "/"
                 + peakSteps
-                + "]";
+                + "] "
+                + heat.status();
     }
 
     public com.zerotheabsolute.surfacefire.physics.TimberBlocks movingBlock(
@@ -451,7 +592,8 @@ public final class StructureField extends SavedData {
         for (int i = 0; i < block.ignition.length; i++)
             if (block.ignition[i] >= 0) {
                 changes.add(change(block, i));
-                if (block.burning(i, now)) schedule(SurfaceCell.fromIndex(pos, i), block.fuel, now);
+                if (block.burning(i, now))
+                    schedule(level, SurfaceCell.fromIndex(pos, i), block.fuel, now);
             }
         setDirty();
     }
@@ -464,6 +606,8 @@ public final class StructureField extends SavedData {
         blocks.clear();
         active.clear();
         frontier.clear();
+        heat.clear();
+        wind.clear();
         changes.clear();
         historyCleanup.clear();
         ignitedCells = consumedBlocks = quenchedBlocks = 0;

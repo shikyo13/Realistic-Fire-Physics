@@ -70,6 +70,23 @@ public final class BurningBlock {
         return lastIgnition + fuel.flameTicks + FireSettings.SMOLDER_TICKS;
     }
 
+    /** Strongest still-burning surface provides a stable origin for upward heat transport. */
+    Direction heatFace(long now) {
+        Direction best = null;
+        int strongest = 0;
+        if (quenched) return null;
+        for (Direction face : StructureTerrain.FACES) {
+            int f = face.get3DDataValue();
+            if (face == Direction.DOWN || faceLast[f] < 0 || now - faceLast[f] >= fuel.flameTicks)
+                continue;
+            if (faceCount[f] > strongest) {
+                strongest = faceCount[f];
+                best = face;
+            }
+        }
+        return strongest >= CanopyHeat.MINIMUM_CELLS ? best : null;
+    }
+
     /** Six fractional sources follow the lit faces, including vertical trunks and undersides. */
     public void emitLight(long now, Long2ByteMap nodes) {
         emitLight(now, nodes, (x, y, z, px, py, pz) -> true);

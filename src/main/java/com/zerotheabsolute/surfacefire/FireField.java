@@ -2,6 +2,9 @@ package com.zerotheabsolute.surfacefire;
 
 import com.zerotheabsolute.surfacefire.simulation.ChunkFireQueue;
 import com.zerotheabsolute.surfacefire.simulation.FireClocks;
+import com.zerotheabsolute.surfacefire.simulation.SpreadTiming;
+import com.zerotheabsolute.surfacefire.structure.CanopyHeat;
+import com.zerotheabsolute.surfacefire.wind.SpreadWind;
 
 import net.minecraft.core.*;
 import net.minecraft.nbt.*;
@@ -27,7 +30,7 @@ public final class FireField extends SavedData {
 
     private record Pending(Site site, Site source, FirePacket.Sample origin, long due) {}
 
-    private record Probe(int fuel, boolean rain) {}
+    private record Probe(int fuel, boolean rain, int exposed) {}
 
     private static final class HotPatch {
         final Set<Site> sites = new HashSet<>();
@@ -47,6 +50,7 @@ public final class FireField extends SavedData {
     private final Map<BlockPos, Integer> retainedBlocks = new HashMap<>();
     private final Map<BlockPos, HotPatch> hotPatches = new HashMap<>();
     private final Map<BlockPos, Probe> probes = new HashMap<>();
+    private final SpreadWind wind = new SpreadWind();
     private long probeTick = Long.MIN_VALUE;
     private boolean ticking;
     private int lastProbes, peakProbes, lastSteps, peakSteps;
@@ -217,11 +221,37 @@ public final class FireField extends SavedData {
         }
         return probes.computeIfAbsent(
                 pos,
-                p -> new Probe(fuel(level, p), level.isRaining() && level.isRainingAt(p.above())));
+                p -> {
+                    int exposed = 0;
+                    for (Direction face : Direction.Plane.HORIZONTAL) {
+                        var neighbor = p.above().relative(face);
+                        if (level.hasChunkAt(neighbor)
+                                && !level.getBlockState(neighbor).isSolidRender(level, neighbor))
+                            exposed |= 1 << face.get3DDataValue();
+                    }
+                    return new Probe(
+                            fuel(level, p),
+                            level.isRaining() && level.isRainingAt(p.above()),
+                            exposed);
+                });
     }
 
     private void schedule(ServerLevel level, Site source, long now) {
         var origin = samples.get(source);
+        var block = source.block();
+        double wx = 0, wz = 0;
+        if (FireSettings.WIND_DRIVEN_SPREAD.get()) {
+            int slot =
+                    wind.sample(
+                            block.asLong(),
+                            block.getX(),
+                            block.getY(),
+                            block.getZ(),
+                            level.getGameTime());
+            int exposed = probe(level, block).exposed;
+            wx = SpreadWind.exposedWind(wind.x(slot), exposed, Direction.WEST, Direction.EAST);
+            wz = SpreadWind.exposedWind(wind.z(slot), exposed, Direction.NORTH, Direction.SOUTH);
+        }
         for (int dx = -1; dx <= 1; dx++)
             for (int dz = -1; dz <= 1; dz++) {
                 if (dx == 0 && dz == 0) continue;
@@ -234,7 +264,10 @@ public final class FireField extends SavedData {
                 }
                 long delay = 6 + Math.floorMod(hash(next), 7);
                 if (dx != 0 && dz != 0) delay = (delay * 14) / 10;
-                long due = now + FireSettings.spreadDelay(delay);
+                long due =
+                        now
+                                + SpreadTiming.delay(
+                                        delay, FireSettings.SPREAD_SPEED.get(), wx, wz, dx, 0, dz);
                 var queued = scheduled.get(next);
                 if (queued != null
                         && clocks.deadline(queued.source.block(), queued.due)
@@ -363,7 +396,10 @@ public final class FireField extends SavedData {
                         owner = outbreaks.merge(owner, samples.get(site).outbreak(), now);
                     com.zerotheabsolute.surfacefire.structure.StructureField.get(level)
                             .igniteAboveGround(level, p, owner);
-                    patch.structureAt = Long.MAX_VALUE;
+                    patch.structureAt =
+                            local < patch.flameUntil
+                                    ? local + CanopyHeat.PULSE_TICKS
+                                    : Long.MAX_VALUE;
                 }
                 if (local >= patch.torchAt) {
                     if (local < patch.flameUntil
@@ -376,6 +412,30 @@ public final class FireField extends SavedData {
                 }
             }
         }
+    }
+
+    public CanopyHeat.Emitter heatEmitter(ServerLevel level, BlockPos pos) {
+        var patch = hotPatches.get(pos);
+        long now = level.getGameTime(), local = time(pos, now);
+        if (patch == null
+                || local >= patch.flameUntil
+                || probe(level, pos).rain
+                || probe(level, pos).fuel == 0) return null;
+        int cells = 0, fuel = 1;
+        long first = Long.MAX_VALUE, owner = 0;
+        for (var site : patch.sites) {
+            var sample = samples.get(site);
+            if (!burning(sample, now)) continue;
+            cells++;
+            first = Math.min(first, sample.ignition());
+            fuel = Math.max(fuel, sample.fuel());
+            owner = sample.outbreak();
+        }
+        if (cells < CanopyHeat.MINIMUM_CELLS) return null;
+        int height =
+                Math.min(fuel == 2 ? 5 : 2, 1 + (int) ((local - first) / CanopyHeat.RISE_TICKS));
+        return new CanopyHeat.Emitter(
+                pos, pos.getX() + .5, pos.getY() + 1.05, pos.getZ() + .5, height, owner);
     }
 
     private void spread(ServerLevel level, long now) {
@@ -590,12 +650,14 @@ public final class FireField extends SavedData {
         historyCleanup.clear();
         hotPatches.clear();
         probes.clear();
+        wind.clear();
         ignitions = 0;
         extinguished = 0;
         lastProbes = peakProbes = lastSteps = peakSteps = 0;
         setDirty();
         for (var player : level.players()) sendSnapshot(player);
         com.zerotheabsolute.surfacefire.structure.StructureField.get(level).clear(level);
+        com.zerotheabsolute.surfacefire.embers.Embers.clear(level);
         FireOutbreaks.get(level).clear();
         com.zerotheabsolute.surfacefire.physics.TimberCollapse.get(level).clear();
         clocks.clear(level);

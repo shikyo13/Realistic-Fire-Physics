@@ -42,6 +42,11 @@ public final class FireSettings {
     public static final ModConfigSpec.IntValue STRUCTURE_CELL_LIMIT;
     public static final ModConfigSpec.IntValue STRUCTURE_WORK_PER_TICK;
     public static final ModConfigSpec.DoubleValue SPREAD_SPEED;
+    public static final ModConfigSpec.BooleanValue WIND_DRIVEN_SPREAD;
+    public static final ModConfigSpec.BooleanValue RISING_HEAT;
+    public static final ModConfigSpec.IntValue HEAT_WORK_PER_TICK;
+    public static final ModConfigSpec.BooleanValue EMBER_IGNITION;
+    public static final ModConfigSpec.DoubleValue EMBER_RELEASE_CHANCE;
     public static final ModConfigSpec.IntValue HISTORY_RETENTION_SECONDS;
     public static final ModConfigSpec.IntValue RETAINED_GROUND_LIMIT;
     public static final ModConfigSpec.IntValue RETAINED_STRUCTURE_LIMIT;
@@ -78,6 +83,23 @@ public final class FireSettings {
                                 "Propagation speed multiplier. Does not"
                                         + " change simulation resolution or work limits.")
                         .defineInRange("spreadSpeedMultiplier", 1.3, .1, 4);
+        WIND_DRIVEN_SPREAD =
+                builder.comment("Gusts accelerate downwind ignition and slow upwind spread.")
+                        .define("windDrivenSpread", true);
+        RISING_HEAT =
+                builder.comment("Established flames heat exposed fuel above and beside them.")
+                        .define("risingHeatIgnites", true);
+        HEAT_WORK_PER_TICK =
+                builder.comment("Maximum terrain probes for rising heat per server tick.")
+                        .defineInRange("heatWorkPerTick", 1024, 80, 8192);
+        EMBER_IGNITION =
+                builder.comment("Rare windborne embers can ignite fuel on contact.")
+                        .define("embersIgnite", true);
+        EMBER_RELEASE_CHANCE =
+                builder.comment(
+                                "Chance per established burning block's heat pulse to release a hot"
+                                    + " ember. At most 24 hot embers are simulated per dimension.")
+                        .defineInRange("emberReleaseChance", .002, 0, 1);
         HISTORY_RETENTION_SECONDS =
                 builder.comment(
                                 "Remove fully cooled burn history after this many seconds. Zero"

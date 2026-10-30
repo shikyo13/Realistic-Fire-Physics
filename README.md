@@ -8,6 +8,8 @@ A fire overhaul for Minecraft Java 1.21.1 with spreading flames, glowing embers,
 - Burning surfaces glow and char. Ground continues to smolder after the flames subside, then cools. Burn marks persist when the world is saved and reopened.
 - Jump onto burning ground to stamp out small patches. Partially burned grass and ferns retain their scorched appearance.
 - Flames bend with local gusts, and held or dropped torch flames trail their movement. Torch sound responds to airflow, with gentle crackling at rest and stronger flutter in motion.
+- Gusts also carry heat: fire advances faster downwind, and rising heat helps ground fires climb trunks and reach exposed canopies.
+- Rare hot embers drift away from established fires and can ignite dry ground, wood, or leaves when they land. They cool during flight, and water or exposed rain extinguishes them.
 - Fire sounds follow their sources, including thrown torches and falling timber, and fade with distance. Throwing a torch produces a brief rush of flame as it flies away.
 - Burning trunks and branches lose support, fall with their attached canopy, and settle into the terrain. Falling wood keeps burning and can ignite nearby fuel; water extinguishes it.
 - Larger fires move in rolling groups of flames and produce a fuller roar as nearby vegetation and wood burn.
@@ -20,7 +22,7 @@ A fire overhaul for Minecraft Java 1.21.1 with spreading flames, glowing embers,
 
 Install the mod in a Minecraft 1.21.1 instance running Java 21 and NeoForge 21.1.206 or a later 21.1 release.
 
-Use flint and steel or a fire charge on grass, moss, podzol, mycelium, or a flammable structure. Ground fire follows connected, exposed fuel at the same elevation. Fire on structures follows individual faces and spreads between adjacent wood and leaf blocks. Active fire and smoldering ground damage living entities; cooled char is safe.
+Use flint and steel or a fire charge on grass, moss, podzol, mycelium, or a flammable structure. Ground fire follows connected fuel, including one-block slopes and grass covered by vines or low leaves. Fire on structures follows individual faces and spreads between adjacent wood and leaf blocks. Active fire and smoldering ground damage living entities; cooled char is safe.
 
 Ignition requires the `doFireTick` game rule to be enabled.
 
@@ -34,6 +36,8 @@ Settings are stored in `config/surfacefire-server.toml`. A world-specific file i
 - `maxStructureBurnCells` limits structure face cells ignited by each connected outbreak. The default is 262,144 cells.
 - `spreadWorkPerTick` and `structureWorkPerTick` control simulation work budgets.
 - `spreadSpeedMultiplier` controls ground and structure propagation speed. The default is `1.3`.
+- `windDrivenSpread` enables directional spread, and `risingHeatIgnites` enables upward heat transfer. Both default to `true`. `heatWorkPerTick` bounds heat-transfer terrain queries (default `1024`).
+- `embersIgnite` enables hot ember ignition. `emberReleaseChance` sets the chance per burning block's heat pulse, default `0.002`. Hot embers share their source fire's spread allowance, with at most 24 in flight per dimension.
 - `fallingLogs` enables support loss and falling wood. `maxFallingTimberBodies` caps simultaneously moving groups per dimension (default `24`), and `maxLogsPerFallingBody` limits each group (default `64` logs). Larger connected structures stay in place.
 - `rainExtinguishesTorches` controls whether rain extinguishes exposed torches.
 - `lavaIgnitesGround` and `lightningIgnitesGround` control ignition from lava and lightning.
@@ -52,4 +56,4 @@ Operator commands:
 
 ## Build
 
-Run `./gradlew build` with Java 21. The distributable is `build/libs/realistic-fire-physics-0.1.1.jar`.
+Run `./gradlew build` with Java 21. The distributable JAR is written to `build/libs/`.

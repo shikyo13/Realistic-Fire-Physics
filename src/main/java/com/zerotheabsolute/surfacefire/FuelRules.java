@@ -22,10 +22,12 @@ public final class FuelRules {
         if (!level.hasChunkAt(p)) return 0;
         var ground = level.getBlockState(p);
         var above = level.getBlockState(p.above());
+        boolean cover = above.is(net.minecraft.tags.BlockTags.LEAVES) || above.is(Blocks.VINE);
         if (!above.getFluidState().isEmpty()
-                || !(above.isAir() || vegetation(above) || TorchBlocks.isTorch(above))) return 0;
+                || !(above.isAir() || vegetation(above) || cover || TorchBlocks.isTorch(above)))
+            return 0;
         if (above.is(Blocks.SNOW)) return 0;
-        return ground(ground) ? (vegetation(above) ? 2 : 1) : 0;
+        return ground(ground) ? (vegetation(above) || cover ? 2 : 1) : 0;
     }
 
     public static boolean ground(net.minecraft.world.level.block.state.BlockState state) {
