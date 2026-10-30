@@ -15,6 +15,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.GameRules;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.saveddata.SavedData;
 import net.minecraft.world.phys.Vec3;
 
@@ -22,7 +23,7 @@ import java.util.*;
 
 /** Support work is scheduled by fire damage, never by scanning loaded chunks. */
 public final class TimberCollapse extends SavedData {
-    private static final int MAX_PENDING = 4096, MAX_CANOPY = 192, WORK_PER_TICK = 512;
+    private static final int MAX_PENDING = 4096, WORK_PER_TICK = 512;
     private static final int RETRY_TICKS = 40;
     private static final Direction[] DIRECTIONS = Direction.values();
     private static final Factory<TimberCollapse> FACTORY =
@@ -105,7 +106,24 @@ public final class TimberCollapse extends SavedData {
             if (component.result() == TimberSupport.Result.UNLOADED) retry.add(seed);
             else if (component.result() == TimberSupport.Result.DETACHED) {
                 pending.removeAll(component.logs());
-                detach(level, component.logs());
+                var canopy =
+                        TimberCanopy.find(
+                                component.logs(),
+                                p -> {
+                                    if (!FireClocks.ticking(level, ChunkPos.asLong(p))) return null;
+                                    var state = level.getBlockState(p);
+                                    return new TimberCanopy.Probe(
+                                            state.is(BlockTags.LEAVES) && !state.hasBlockEntity(),
+                                            state.is(BlockTags.LOGS),
+                                            state.hasProperty(BlockStateProperties.DISTANCE)
+                                                    ? state.getValue(BlockStateProperties.DISTANCE)
+                                                    : TimberCanopy.CANOPY_DISTANCE);
+                                },
+                                TimberStorage.MAX_PARTS - component.logs().size());
+                lastWork += canopy.probes();
+                if (canopy.result() == TimberCanopy.Result.COMPLETE)
+                    detach(level, component.logs(), canopy.leaves());
+                else retry.add(seed);
             }
             setDirty();
         }
@@ -113,35 +131,9 @@ public final class TimberCollapse extends SavedData {
         if (!retry.isEmpty()) nextAttempt = level.getGameTime() + RETRY_TICKS;
     }
 
-    private void detach(ServerLevel level, Set<BlockPos> logs) {
+    private void detach(ServerLevel level, Set<BlockPos> logs, Set<BlockPos> canopy) {
         var positions = new LinkedHashSet<>(logs);
-        var leaves = new ArrayDeque<BlockPos>();
-        var seen = new HashSet<BlockPos>(logs);
-        leaves.addAll(logs);
-        while (!leaves.isEmpty() && positions.size() < logs.size() + MAX_CANOPY) {
-            var pos = leaves.removeFirst();
-            for (Direction direction : DIRECTIONS) {
-                var next = pos.relative(direction);
-                if (!seen.add(next)
-                        || !level.hasChunkAt(next)
-                        || !level.getBlockState(next).is(BlockTags.LEAVES)) continue;
-                if (logs.stream().noneMatch(log -> log.distManhattan(next) <= 5)) continue;
-                boolean otherTrunk = false;
-                for (Direction d : DIRECTIONS) {
-                    var neighbor = next.relative(d);
-                    if (!level.hasChunkAt(neighbor)
-                            || level.getBlockState(neighbor).is(BlockTags.LOGS)
-                                    && !logs.contains(neighbor)) {
-                        otherTrunk = true;
-                        break;
-                    }
-                }
-                if (otherTrunk) continue;
-                positions.add(next);
-                leaves.add(next);
-                if (positions.size() >= logs.size() + MAX_CANOPY) break;
-            }
-        }
+        positions.addAll(canopy);
         var origin = logs.iterator().next();
         var field = StructureField.get(level);
         var parts = new ArrayList<TimberBlocks>();
