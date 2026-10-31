@@ -10,20 +10,43 @@ import java.util.Collection;
 final class HeatHazeSources {
     static final int CAPACITY = 256, LIFETIME_TICKS = 8;
     private static final double CELL_SIZE = 2;
+    private static final int WICK_LIFETIME_TICKS = 3;
+    private static final double NEAR_WICK_DISTANCE_SQUARED = .2 * .2;
+    private static final double NEAR_SURFACE_DISTANCE_SQUARED = 1;
+    private static final double NEAR_WICK_WIDTH_RATIO = .45, NEAR_WICK_HEIGHT_RATIO = .9;
     private final Long2ObjectOpenHashMap<Source> sources = new Long2ObjectOpenHashMap<>();
 
     static final class Source {
-        final double x, z;
+        final boolean wick;
+        double x, z;
         double y, strength, width, height;
         long tick = Long.MIN_VALUE;
 
-        Source(double x, double z) {
+        Source(double x, double z, boolean wick) {
             this.x = x;
             this.z = z;
+            this.wick = wick;
+        }
+
+        int lifetime() {
+            return wick ? WICK_LIFETIME_TICKS : LIFETIME_TICKS;
         }
 
         double strength(double now) {
-            return strength * Math.clamp((LIFETIME_TICKS - (now - tick)) / 4.0, 0, 1);
+            return strength * Math.clamp((lifetime() - (now - tick)) / (wick ? 2.0 : 4.0), 0, 1);
+        }
+
+        boolean outsideNearLimit(double squaredDistance) {
+            return squaredDistance
+                    >= (wick ? NEAR_WICK_DISTANCE_SQUARED : NEAR_SURFACE_DISTANCE_SQUARED);
+        }
+
+        double visibleWidth(double distance) {
+            return wick ? Math.min(width, distance * NEAR_WICK_WIDTH_RATIO) : width;
+        }
+
+        double visibleHeight(double distance) {
+            return wick ? Math.min(height, distance * NEAR_WICK_HEIGHT_RATIO) : height;
         }
     }
 
@@ -42,8 +65,16 @@ final class HeatHazeSources {
         var source = sources.get(key);
         if (source == null) {
             if (sources.size() >= CAPACITY) return;
-            source = new Source(wick ? x : (bx + .5) * CELL_SIZE, wick ? z : (bz + .5) * CELL_SIZE);
+            source =
+                    new Source(
+                            wick ? x : (bx + .5) * CELL_SIZE,
+                            wick ? z : (bz + .5) * CELL_SIZE,
+                            wick);
             sources.put(key, source);
+        }
+        if (wick) {
+            source.x = x;
+            source.z = z;
         }
         if (source.tick != tick) {
             source.y = y;
@@ -61,8 +92,10 @@ final class HeatHazeSources {
 
     void expire(long tick) {
         var iterator = sources.values().iterator();
-        while (iterator.hasNext())
-            if (tick - iterator.next().tick >= LIFETIME_TICKS) iterator.remove();
+        while (iterator.hasNext()) {
+            var source = iterator.next();
+            if (tick - source.tick >= source.lifetime()) iterator.remove();
+        }
     }
 
     Collection<Source> values() {

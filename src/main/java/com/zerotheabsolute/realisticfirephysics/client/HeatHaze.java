@@ -23,6 +23,7 @@ import org.lwjgl.opengl.GL30;
 @EventBusSubscriber(modid = RealisticFirePhysics.MOD_ID, value = Dist.CLIENT)
 public final class HeatHaze {
     private static final double MAX_DISTANCE_SQUARED = 48 * 48;
+    private static final double WICK_STRENGTH = .8, WICK_WIDTH = .5, WICK_HEIGHT = 1.05;
     private static final HeatHazeSources SOURCES = new HeatHazeSources();
     private static final double[] WIND = new double[3];
     private static TextureTarget scene;
@@ -45,9 +46,9 @@ public final class HeatHaze {
                 x,
                 y + (wick ? .1 : .35),
                 z,
-                wick ? heat * .3 : heat,
-                wick ? .35 : 2.5,
-                wick ? .7 : 1.8 + heat * 1.8,
+                wick ? heat * WICK_STRENGTH : heat,
+                wick ? WICK_WIDTH : 2.5,
+                wick ? WICK_HEIGHT : 1.8 + heat * 1.8,
                 mc.level.getGameTime());
     }
 
@@ -75,7 +76,7 @@ public final class HeatHaze {
         boolean visible = false;
         for (var source : SOURCES.values()) {
             double distance = camera.distanceToSqr(source.x, source.y, source.z);
-            if (distance < 1 || distance > MAX_DISTANCE_SQUARED) continue;
+            if (!source.outsideNearLimit(distance) || distance > MAX_DISTANCE_SQUARED) continue;
             double x = source.x - camera.x, y = source.y + source.height * .5 - camera.y;
             double z = source.z - camera.z;
             if (x * direction.x() + y * direction.y() + z * direction.z() > 0) {
@@ -124,12 +125,14 @@ public final class HeatHaze {
                             .begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_TEX_COLOR);
             for (var source : SOURCES.values()) {
                 double distance = camera.distanceToSqr(source.x, source.y, source.z);
-                if (distance > MAX_DISTANCE_SQUARED || distance < 1) continue;
+                if (distance > MAX_DISTANCE_SQUARED || !source.outsideNearLimit(distance)) continue;
                 double strength = source.strength(now);
                 if (strength <= .01) continue;
                 WorldAirflow.sample(now / 20, source.x, source.y, source.z, WIND);
                 double x = source.x - camera.x, y = source.y - camera.y, z = source.z - camera.z;
-                double half = source.width * .5;
+                double meters = Math.sqrt(distance);
+                double half = source.visibleWidth(meters) * .5;
+                double height = source.visibleHeight(meters);
                 double bendX = Math.clamp(WIND[0] * .2, -.6, .6);
                 double bendZ = Math.clamp(WIND[2] * .2, -.6, .6);
                 vertex(builder, x - right.x * half, y, z - right.z * half, 0, 0, strength);
@@ -137,7 +140,7 @@ public final class HeatHaze {
                 vertex(
                         builder,
                         x + right.x * half + bendX,
-                        y + source.height,
+                        y + height,
                         z + right.z * half + bendZ,
                         1,
                         1,
@@ -145,7 +148,7 @@ public final class HeatHaze {
                 vertex(
                         builder,
                         x - right.x * half + bendX,
-                        y + source.height,
+                        y + height,
                         z - right.z * half + bendZ,
                         0,
                         1,

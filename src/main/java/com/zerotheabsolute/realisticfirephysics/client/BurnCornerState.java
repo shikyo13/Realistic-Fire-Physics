@@ -19,6 +19,7 @@ final class BurnCornerState {
     private final double[] start = new double[4], slope = new double[4];
     private long epoch = Long.MIN_VALUE, nextChange = Long.MIN_VALUE;
     private long clockRevision = Long.MIN_VALUE;
+    private boolean constant;
     float cover, heat, ember, dry;
 
     BurnCornerState(FirePacket.Sample[] samples) {
@@ -53,7 +54,9 @@ final class BurnCornerState {
         if (now < epoch || now >= nextChange || revision != clockRevision) {
             prepare((long) Math.floor(now), clocks);
             clockRevision = revision;
-        }
+            constant =
+                    slope[COVER] == 0 && slope[HEAT] == 0 && slope[EMBER] == 0 && slope[DRY] == 0;
+        } else if (constant) return;
         double elapsed = now - epoch;
         cover = value(COVER, elapsed);
         heat = value(HEAT, elapsed);

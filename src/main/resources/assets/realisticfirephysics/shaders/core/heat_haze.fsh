@@ -7,6 +7,7 @@ uniform float HeatStrength;
 in vec2 heatUv;
 in float strength;
 out vec4 fragColor;
+const float DISTORTION_PIXELS_AT_1080 = 2.2;
 void main() {
     vec2 screen = gl_FragCoord.xy / SceneSize;
     float depth = texture(SceneDepth, screen).r;
@@ -17,7 +18,7 @@ void main() {
     float a = p.y * 18.0 - HeatTime * 4.1;
     float b = p.x * 12.0 + HeatTime * 1.9;
     vec2 curl = vec2(sin(a + sin(b)), cos(b + .7 * sin(a * .73)));
-    vec2 offset = curl * shape * strength * HeatStrength * 1.8 * (SceneSize.y / 1080.0) / SceneSize;
+    vec2 offset = curl * shape * strength * HeatStrength * DISTORTION_PIXELS_AT_1080 * (SceneSize.y / 1080.0) / SceneSize;
     vec2 sampleUv = clamp(screen + offset, .5 / SceneSize, 1.0 - .5 / SceneSize);
     // Sampling across a foreground silhouette must never pull that object into the hot air.
     if (texture(SceneDepth, sampleUv).r + .000001 < gl_FragCoord.z) sampleUv = screen;
