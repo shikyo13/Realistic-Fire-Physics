@@ -10,9 +10,9 @@ import sys
 from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[1]
-SHADERS = ROOT / 'src/main/resources/assets/surfacefire/shaders/core'
+SHADERS = ROOT / 'src/main/resources/assets/realisticfirephysics/shaders/core'
 INCLUDES = SHADERS.parent / 'include'
-OUTPUT = ROOT / 'src/main/resources/assets/surfacefire/textures/effect'
+OUTPUT = ROOT / 'src/main/resources/assets/realisticfirephysics/textures/effect'
 FRAMES, COLUMNS, RATE, BLEND = 128, 8, 60, 16
 GL = C.CDLL('/System/Library/Frameworks/OpenGL.framework/OpenGL')
 
@@ -84,7 +84,7 @@ def render(obj, size, seconds, tint, scale=1, root_softness=.025):
 def atlas(name, size):
     source_name='flame' if name=='surface_flame' else name
     source=(SHADERS/(source_name+'.fsh')).read_text()
-    source=re.sub(r'#moj_import <surfacefire:([a-z_]+\.glsl)>',
+    source=re.sub(r'#moj_import <realisticfirephysics:([a-z_]+\.glsl)>',
                   lambda match: (INCLUDES / match.group(1)).read_text(), source)
     if name != 'smoke':
         # Entity blending multiplies alpha itself, unlike the additive native pass.

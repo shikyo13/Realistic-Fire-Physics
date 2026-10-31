@@ -24,7 +24,7 @@ description='''${mod_description}'''
     side="BOTH"
 
 [[mixins]]
-config="surfacefire.mixins.json"
+config="realisticfirephysics.mixins.json"
 
 [[mixins]]
-config="surfacefire-light.mixins.json"
+config="realisticfirephysics-light.mixins.json"

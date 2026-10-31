@@ -5,7 +5,7 @@ A fire overhaul for Minecraft Java 1.21.1 with spreading flames, glowing embers,
 ## Features
 
 - Fire spreads across ground, wood, and leaves at finer than block resolution. Stone, gaps, water, and removed fuel interrupt its path.
-- Burning surfaces glow and char. Ground continues to smolder after the flames subside, then cools. Burn marks persist when the world is saved and reopened.
+- Burning surfaces glow and char. Ground continues to smolder after the flames subside, then cools. Burn marks survive saving and reopening. Exposed rain slowly restores cooled ground as pixels of the original grass texture grow inward from the edges of scorched soil.
 - Jump onto burning ground to stamp out small patches. Partially burned grass and ferns retain their scorched appearance.
 - Flames bend with local gusts, and held or dropped torch flames trail their movement. Torch sound responds to airflow, with gentle crackling at rest and stronger flutter in motion.
 - Gusts also carry heat: fire advances faster downwind, and rising heat helps ground fires climb trunks and reach exposed canopies.
@@ -30,7 +30,7 @@ Fire follows Minecraft's chunk ticking rules. Combustion pauses outside the tick
 
 ## Configuration
 
-Settings are stored in `config/surfacefire-server.toml`. A world-specific file in `serverconfig/` can override them.
+Settings are stored in `config/realisticfirephysics-server.toml`. A world-specific file in `serverconfig/` can override them.
 
 - `maxBurnCells` limits ground coverage for each connected outbreak. The default is 65,536 cells, equivalent to 1,024 fully covered blocks.
 - `maxStructureBurnCells` limits structure face cells ignited by each connected outbreak. The default is 262,144 cells.
@@ -41,18 +41,22 @@ Settings are stored in `config/surfacefire-server.toml`. A world-specific file i
 - `fallingLogs` enables support loss and falling wood. `maxFallingTimberBodies` caps simultaneously moving groups per dimension (default `24`), and `maxLogsPerFallingBody` limits each group (default `64` logs). Larger connected structures stay in place.
 - `rainExtinguishesTorches` controls whether rain extinguishes exposed torches.
 - `lavaIgnitesGround` and `lightningIgnitesGround` control ignition from lava and lightning.
-- `burnHistoryRetentionSeconds` optionally removes scars after they have fully cooled for this many seconds. The default, `0`, preserves them indefinitely.
+- `rainRecoveryMinutes` sets the regrowth rate during exposed rain. Pixels of the original grass texture grow smoothly inward from the burn perimeter, over unchanged scorched soil. The default is `30` minutes for the front to advance two blocks; larger burned areas take longer to fill. Recovery pauses in inactive chunks; roofs shelter the ground. Set it to `0` to preserve ground scars.
+- `burnHistoryRetentionSeconds` optionally removes cold scars after this many seconds. The default, `0`, disables age-based cleanup.
 - `maxRetainedGroundCells` and `maxRetainedStructureBlocks` optionally set history storage targets. Both default to `0`, which disables capacity cleanup. Active fire and smoldering material are protected even when a target is exceeded.
 - `historyCleanupWorkPerTick` controls the amount of optional cleanup work per tick.
 
 Independent ignitions receive separate spread allowances. Connected fronts share one budget, with their previously burned coverage added together; joining fires does not reset that coverage. Finished burns retain their scars without preventing new fires elsewhere. Ground and structures share outbreak identity but have separate coverage limits. A separate safety ceiling bounds total live outbreak coverage in each dimension.
 
-History cleanup is disabled by default. Enabling it removes eligible burn marks, allowing remaining fuel there to burn again; it does not restore consumed plants or blocks. Replacing burned terrain removes its old burn history. Preserving more scars increases saved history, so larger worlds can use retention settings to control that storage separately from fire spread.
+Age and capacity cleanup are disabled by default. Enabling them removes eligible cold burn marks as chunks are visited, allowing remaining fuel there to burn again. Rain recovery gradually restores the ground surface; it does not rebuild consumed trees or structures. Replacing burned terrain removes its old scars. Cooled scars are stored with their chunks and are separate from active combustion, lighting and damage. Existing worlds and configuration files migrate automatically.
 
 Operator commands:
 
-- `/surfacefire status` reports the dimension's fire state.
-- `/surfacefire clear` stops fire in the dimension and removes burn marks. Consumed vegetation is not restored.
+- `/rfp status` reports the dimension's fire state.
+- `/rfp extinguish` stops current fires and hot embers while preserving burn marks.
+- `/rfp clear` stops fire in the dimension and removes burn marks. Consumed vegetation is not restored.
+
+The full `/realisticfirephysics` command and the previous `/surfacefire` spelling are aliases of `/rfp`.
 
 ## Build
 

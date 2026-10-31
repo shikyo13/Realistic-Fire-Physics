@@ -1,0 +1,10 @@
+{
+  "torch_burn": {
+    "subtitle": "subtitles.realisticfirephysics.torch_burn",
+    "sounds": [{"name": "minecraft:block.fire.ambient", "type": "event"}]
+  },
+  "wildfire": {
+    "subtitle": "subtitles.realisticfirephysics.wildfire",
+    "sounds": [{"name": "minecraft:block.fire.ambient", "type": "event"}]
+  }
+}

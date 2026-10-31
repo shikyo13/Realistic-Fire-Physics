@@ -3,9 +3,9 @@
   "overrides": [
     {
       "predicate": {
-        "surfacefire:extinguished": 1
+        "realisticfirephysics:extinguished": 1
       },
-      "model": "surfacefire:item/extinguished_torch"
+      "model": "realisticfirephysics:item/extinguished_torch"
     }
   ]
 }

@@ -1,0 +1,19 @@
+{
+  "required": true,
+  "package": "com.zerotheabsolute.realisticfirephysics.client.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "client": [
+    "TorchItemMixin",
+    "TorchEntityAirflowMixin",
+    "HeldTorchAirflowMixin",
+    "TorchParticleMixin",
+    "TorchItemLightMixin",
+    "CandleFlameMixin",
+    "TerrainScorchMixin",
+    "IrisFlameMaterialMixin",
+    "FlameSortMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

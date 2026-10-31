@@ -1,0 +1,7 @@
+{
+  "block.realisticfirephysics.torch": "Torch",
+  "block.realisticfirephysics.wall_torch": "Wall Torch",
+  "subtitles.realisticfirephysics.torch_burn": "Torch crackles",
+  "subtitles.realisticfirephysics.wildfire": "Fire roars",
+  "entity.realisticfirephysics.flying_ember": "Hot Ember"
+}
