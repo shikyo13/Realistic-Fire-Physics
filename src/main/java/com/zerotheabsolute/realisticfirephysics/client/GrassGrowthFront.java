@@ -21,6 +21,8 @@ final class GrassGrowthFront {
     private final byte[] scatteredDirections = new byte[starts.length];
     private final long positionSeed;
     private GrassGrowthStyle style;
+    private GrassGrowthEffect effect = GrassGrowthEffect.NONE;
+    private float[] normalX, normalZ;
     private int[] textureOrder;
     private long footprint = -1L;
     private int footprintPixels;
@@ -35,6 +37,8 @@ final class GrassGrowthFront {
     @FunctionalInterface
     interface Surface {
         void quad(float ax, float az, float bx, float bz, float cx, float cz, float dx, float dz);
+
+        default void material(float youth, float normalX, float normalZ) {}
     }
 
     GrassGrowthFront(long positionSeed) {
@@ -56,9 +60,32 @@ final class GrassGrowthFront {
     }
 
     void configure(GrassGrowthStyle style, float[] texture, long footprint) {
+        configure(style, texture, footprint, GrassGrowthEffect.NONE);
+    }
+
+    void configure(
+            GrassGrowthStyle style, float[] texture, long footprint, GrassGrowthEffect effect) {
         this.style = style;
+        this.effect = effect;
         this.footprint = footprint;
         footprintPixels = Long.bitCount(footprint) * 4;
+        if (effect == GrassGrowthEffect.RELIEF) {
+            if (normalX == null) {
+                normalX = new float[starts.length];
+                normalZ = new float[starts.length];
+            }
+            for (int pixel = 0; pixel < normalX.length; pixel++) {
+                normalX[pixel] =
+                        GrassGrowthShading.slope(
+                                texture, pixel % RESOLUTION, pixel / RESOLUTION, true);
+                normalZ[pixel] =
+                        GrassGrowthShading.slope(
+                                texture, pixel % RESOLUTION, pixel / RESOLUTION, false);
+            }
+        } else {
+            normalX = null;
+            normalZ = null;
+        }
         System.arraycopy(scatteredDirections, 0, directions, 0, directions.length);
         if (style == GrassGrowthStyle.TEXTURE
                 || style == GrassGrowthStyle.TUFTS
@@ -114,6 +141,10 @@ final class GrassGrowthFront {
 
     GrassGrowthStyle style() {
         return style;
+    }
+
+    GrassGrowthEffect effect() {
+        return effect;
     }
 
     private static float clustered(int x, int z) {
@@ -199,11 +230,30 @@ final class GrassGrowthFront {
         for (int i = 0; i < movingCount; i++) {
             int pixel = moving[i], x = pixel % RESOLUTION, z = pixel / RESOLUTION;
             float amount = amounts[pixel];
+            float youth = GrassGrowthShading.youth(amount);
+            sink.material(
+                    effect == GrassGrowthEffect.FRESH ? youth : 0,
+                    effect == GrassGrowthEffect.RELIEF ? normalX[pixel] * youth : 0,
+                    effect == GrassGrowthEffect.RELIEF ? normalZ[pixel] * youth : 0);
             // Only the growing edge moves; its texture remains anchored to the terrain.
             amount = amount * amount * (3 - 2 * amount);
             float x0 = x / (float) RESOLUTION, x1 = (x + 1f) / RESOLUTION;
             float z0 = z / (float) RESOLUTION, z1 = (z + 1f) / RESOLUTION;
-            float length = amount / RESOLUTION;
+            float longitudinal =
+                    effect == GrassGrowthEffect.EMERGING ? (float) Math.cbrt(amount) : amount;
+            float transverse =
+                    effect == GrassGrowthEffect.EMERGING
+                            ? longitudinal > 0 ? amount / longitudinal : 0
+                            : 1;
+            float length = longitudinal / RESOLUTION;
+            float inset = (1 - transverse) / (2 * RESOLUTION);
+            if (directions[pixel] < 2) {
+                z0 += inset;
+                z1 -= inset;
+            } else {
+                x0 += inset;
+                x1 -= inset;
+            }
             switch (directions[pixel]) {
                 case 0 -> x1 = x0 + length;
                 case 1 -> x0 = x1 - length;
@@ -215,6 +265,7 @@ final class GrassGrowthFront {
     }
 
     void drawFixed(Surface sink) {
+        sink.material(0, 0, 0);
         System.arraycopy(rows, 0, mergedRows, 0, RESOLUTION);
         for (int z = 0; z < RESOLUTION; z++)
             for (int x = 0; x < RESOLUTION; x++) {

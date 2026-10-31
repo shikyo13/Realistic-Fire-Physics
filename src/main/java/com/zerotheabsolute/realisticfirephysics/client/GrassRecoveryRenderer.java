@@ -259,6 +259,7 @@ final class GrassRecoveryRenderer {
         boolean visible;
         VertexConsumer consumer;
         float x, y, z;
+        float youth, nx, ny = 1, nz;
 
         Tile(BlockPos pos, ChunkScars.Ground ground, double now) {
             this.pos = pos.immutable();
@@ -297,13 +298,26 @@ final class GrassRecoveryRenderer {
                 }
             }
             var style = FireClientSettings.GRASS_GROWTH_STYLE.get();
+            var effect = FireClientSettings.GRASS_GROWTH_EFFECT.get();
             long nextFootprint = ground.cells() | ground.grown();
-            if (patternChanged || front.style() != style || footprint != nextFootprint) {
+            if (patternChanged
+                    || front.style() != style
+                    || front.effect() != effect
+                    || footprint != nextFootprint) {
                 footprint = nextFootprint;
-                front.configure(style, texturePattern, footprint);
+                front.configure(style, texturePattern, footprint, effect);
                 changed = true;
             }
             return changed;
+        }
+
+        @Override
+        public void material(float youth, float normalX, float normalZ) {
+            this.youth = youth;
+            float length = (float) Math.sqrt(1 + normalX * normalX + normalZ * normalZ);
+            nx = normalX / length;
+            ny = 1 / length;
+            nz = normalZ / length;
         }
 
         @Override
@@ -319,11 +333,15 @@ final class GrassRecoveryRenderer {
 
         private void vertex(GrassSurface m, float u, float v) {
             consumer.addVertex(x + u, y, z + v)
-                    .setColor(m.red, m.green, m.blue, 255)
+                    .setColor(
+                            GrassGrowthShading.red(m.red, youth),
+                            GrassGrowthShading.green(m.green, youth),
+                            GrassGrowthShading.blue(m.blue, youth),
+                            255)
                     .setUv(m.u(u, v), m.v(u, v))
                     .setOverlay(OverlayTexture.NO_OVERLAY)
                     .setLight(light)
-                    .setNormal(0, 1, 0);
+                    .setNormal(nx, ny, nz);
         }
     }
 }

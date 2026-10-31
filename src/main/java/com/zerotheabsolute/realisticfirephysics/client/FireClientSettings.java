@@ -8,6 +8,7 @@ public final class FireClientSettings {
     public static final ModConfigSpec.BooleanValue HEAT_HAZE;
     public static final ModConfigSpec.DoubleValue HEAT_HAZE_STRENGTH;
     public static final ModConfigSpec.EnumValue<GrassGrowthStyle> GRASS_GROWTH_STYLE;
+    public static final ModConfigSpec.EnumValue<GrassGrowthEffect> GRASS_GROWTH_EFFECT;
 
     static {
         var builder = new ModConfigSpec.Builder();
@@ -20,8 +21,13 @@ public final class FireClientSettings {
         GRASS_GROWTH_STYLE =
                 builder.comment(
                                 "Grass recovery appearance: SCATTERED pixels, PATCHES, TEXTURE"
-                                    + " paths, small TUFTS, or creeping RUNNERS.")
+                                        + " paths, small TUFTS, or creeping RUNNERS.")
                         .defineEnum("grassGrowthStyle", GrassGrowthStyle.SCATTERED);
+        GRASS_GROWTH_EFFECT =
+                builder.comment(
+                                "Emerging grass treatment: NONE, FRESH color, RELIEF lighting, or"
+                                    + " EMERGING pixel shapes.")
+                        .defineEnum("grassGrowthEffect", GrassGrowthEffect.NONE);
         SPEC = builder.build();
     }
 

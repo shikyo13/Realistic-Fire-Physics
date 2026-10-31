@@ -57,6 +57,8 @@ Local rendering settings are in `config/realisticfirephysics-client.toml`. `heat
 
 `grassGrowthStyle` changes the appearance of recovering grass without changing its recovery rate. `SCATTERED` restores individual texture pixels, `PATCHES` joins them into small clusters, and `TEXTURE` grows connected paths from small starting patches. `TUFTS` builds small groups along details in the grass texture; `RUNNERS` extends narrow, branching growth between them. Each style preserves the block's original texture and biome color over the scorched soil.
 
+`grassGrowthEffect` adds an optional treatment to emerging grass. `FRESH` gives new grass a subtle warm tint that matures into its original color. `RELIEF` adds shallow surface lighting based on the native texture. `EMERGING` lets small marks lengthen and widen into complete pixels. The default is `NONE`; all treatments finish at the original grass appearance.
+
 Operator commands:
 
 - `/rfp status` reports the dimension's fire state.
