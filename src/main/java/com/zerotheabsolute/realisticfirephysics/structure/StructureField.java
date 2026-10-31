@@ -170,9 +170,7 @@ public final class StructureField extends SavedData {
         double wx = 0, wz = 0;
         if (FireSettings.WIND_DRIVEN_SPREAD.get()) {
             BlockPos pos = cell.block();
-            int slot =
-                    wind.sample(
-                            pos.asLong(), pos.getX(), pos.getY(), pos.getZ(), level.getGameTime());
+            int slot = wind.surface(level, pos, cell.face(), level.getGameTime());
             int exposed = terrain(level).probe(pos).exposed();
             wx = SpreadWind.exposedWind(wind.x(slot), exposed, Direction.WEST, Direction.EAST);
             wz = SpreadWind.exposedWind(wind.z(slot), exposed, Direction.NORTH, Direction.SOUTH);
@@ -329,7 +327,12 @@ public final class StructureField extends SavedData {
         if (FireSettings.WIND_DRIVEN_SPREAD.get()) {
             int slot =
                     wind.sample(
-                            pos.asLong(), pos.getX(), pos.getY(), pos.getZ(), level.getGameTime());
+                            level,
+                            pos.asLong(),
+                            pos.getX(),
+                            pos.getY(),
+                            pos.getZ(),
+                            level.getGameTime());
             wx = wind.x(slot);
             wz = wind.z(slot);
         }
@@ -342,6 +345,16 @@ public final class StructureField extends SavedData {
         ServerLevel level;
         CanopyHeat.Emitter emitter;
         private final BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+        private final double[] velocity = new double[3];
+
+        @Override
+        public double[] airflow(double x, double y, double z) {
+            if (!FireSettings.WIND_DRIVEN_SPREAD.get() || !FireSettings.TERRAIN_WIND.get())
+                return null;
+            com.zerotheabsolute.realisticfirephysics.wind.ServerAirflow.get(level)
+                    .sample(level.getGameTime() / 20.0, x, y, z, velocity);
+            return velocity;
+        }
 
         public int inspect(int x, int y, int z) {
             cursor.set(x, y, z);

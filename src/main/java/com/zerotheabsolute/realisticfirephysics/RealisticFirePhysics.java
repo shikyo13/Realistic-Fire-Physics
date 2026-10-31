@@ -31,6 +31,9 @@ public final class RealisticFirePhysics {
         LegacyNames.globalConfig();
         modBus.addListener(net.neoforged.bus.api.EventPriority.LOWEST, LegacyNames::aliases);
         container.registerConfig(net.neoforged.fml.config.ModConfig.Type.SERVER, FireSettings.SPEC);
+        container.registerConfig(
+                net.neoforged.fml.config.ModConfig.Type.CLIENT,
+                com.zerotheabsolute.realisticfirephysics.client.FireClientSettings.SPEC);
         com.zerotheabsolute.realisticfirephysics.torch.TorchBlocks.BLOCKS.register(modBus);
         com.zerotheabsolute.realisticfirephysics.audio.FireSounds.SOUNDS.register(modBus);
         com.zerotheabsolute.realisticfirephysics.physics.TimberEntities.TYPES.register(modBus);
@@ -96,6 +99,7 @@ public final class RealisticFirePhysics {
         if (e.getLevel() instanceof ServerLevel level) {
             prepare(level);
             FireClocks.get(level).tick(level);
+            com.zerotheabsolute.realisticfirephysics.wind.ServerAirflow.tick(level);
             FireField.get(level).tick(level);
             StructureField.get(level).tick(level);
             com.zerotheabsolute.realisticfirephysics.physics.TimberCollapse.get(level).tick(level);

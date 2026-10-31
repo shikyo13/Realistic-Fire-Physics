@@ -43,6 +43,7 @@ public final class FireSettings {
     public static final ModConfigSpec.IntValue STRUCTURE_WORK_PER_TICK;
     public static final ModConfigSpec.DoubleValue SPREAD_SPEED;
     public static final ModConfigSpec.BooleanValue WIND_DRIVEN_SPREAD;
+    public static final ModConfigSpec.BooleanValue TERRAIN_WIND;
     public static final ModConfigSpec.BooleanValue RISING_HEAT;
     public static final ModConfigSpec.IntValue HEAT_WORK_PER_TICK;
     public static final ModConfigSpec.BooleanValue EMBER_IGNITION;
@@ -87,6 +88,11 @@ public final class FireSettings {
         WIND_DRIVEN_SPREAD =
                 builder.comment("Gusts accelerate downwind ignition and slow upwind spread.")
                         .define("windDrivenSpread", true);
+        TERRAIN_WIND =
+                builder.comment(
+                                "Nearby solid terrain redirects gusts and shelters enclosed"
+                                    + " flames.")
+                        .define("terrainAwareWind", true);
         RISING_HEAT =
                 builder.comment("Established flames heat exposed fuel above and beside them.")
                         .define("risingHeatIgnites", true);

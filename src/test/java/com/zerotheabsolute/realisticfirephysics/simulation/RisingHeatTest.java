@@ -76,4 +76,30 @@ class RisingHeatTest {
         assertEquals(work, empty.probes);
         assertTrue(work <= RisingHeat.MAX_PROBES);
     }
+
+    @Test
+    void ShelteredLocalAirOverridesAnOutdoorGust() {
+        var world = new World();
+        var fuel = new Cell(2, 5, 0);
+        world.terrain.put(fuel, RisingHeat.FUEL);
+        var local =
+                new RisingHeat.Access() {
+                    final double[] calm = new double[3];
+
+                    public int inspect(int x, int y, int z) {
+                        return world.inspect(x, y, z);
+                    }
+
+                    public void ignite(int x, int y, int z, double fx, double fy, double fz) {
+                        world.ignite(x, y, z, fx, fy, fz);
+                    }
+
+                    public double[] airflow(double x, double y, double z) {
+                        return calm;
+                    }
+                };
+        RisingHeat.trace(.5, 1.05, .5, 3, 0, 5, local);
+        assertFalse(world.ignited.contains(fuel));
+        assertTrue(world.probes <= RisingHeat.MAX_PROBES);
+    }
 }

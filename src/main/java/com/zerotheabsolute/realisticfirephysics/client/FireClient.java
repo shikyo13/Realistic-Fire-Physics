@@ -102,6 +102,13 @@ public final class FireClient {
                     new ShaderInstance(
                             e.getResourceProvider(),
                             ResourceLocation.fromNamespaceAndPath(
+                                    RealisticFirePhysics.MOD_ID, "heat_haze"),
+                            DefaultVertexFormat.POSITION_TEX_COLOR),
+                    s -> HeatHaze.shader = s);
+            e.registerShader(
+                    new ShaderInstance(
+                            e.getResourceProvider(),
+                            ResourceLocation.fromNamespaceAndPath(
                                     RealisticFirePhysics.MOD_ID, "ground"),
                             DefaultVertexFormat.POSITION_TEX_COLOR),
                     s -> FireRenderTypes.ground = s);
@@ -687,9 +694,16 @@ public final class FireClient {
                             tile.distance <= FireViewDistance.squared(mc)
                                     && e.getFrustum().isVisible(tile.bounds)
                                     && FireField.fuel(mc.level, tile.pos) > 0;
-                    if (tile.visible && tile.time < tile.flameUntil)
+                    if (tile.visible && tile.time < tile.flameUntil) {
                         tile.motion.update(
                                 now / 20, tile.pos.getX(), tile.pos.getY(), tile.pos.getZ());
+                        HeatHaze.offer(
+                                tile.pos.getX() + .5,
+                                tile.pos.getY() + 1.12,
+                                tile.pos.getZ() + .5,
+                                clamp((tile.flameUntil - tile.time) / 12.0),
+                                false);
+                    }
                     if (!tile.visible || textured || tile.time >= tile.effectsUntil) continue;
                     for (var q : tile.quads) {
                         q.a.draw(ground, now);
@@ -798,7 +812,7 @@ public final class FireClient {
             for (var s : VISIBLE_SMOKE) {
                 double burnTime = FireClocks.get(mc.level).time(s.block(), now);
                 double age = (burnTime - s.ignition()) / 20.0;
-                FireParticles.offer(
+                FireParticles.emit(
                         (s.site().x() + .5) / 8.0,
                         s.site().y() + 1.12,
                         (s.site().z() + .5) / 8.0,

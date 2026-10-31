@@ -168,7 +168,6 @@ final class StructureFireClient {
         final AABB bounds;
         int light;
         double time;
-        final FlameMotion motion = new FlameMotion();
 
         Mesh(BurningBlock block) {
             this.block = block;
@@ -177,6 +176,7 @@ final class StructureFireClient {
     }
 
     private static final class Face {
+        final FlameMotion motion = new FlameMotion();
         final BurningBlock block;
         final Direction direction;
         final Vec3 normal;
@@ -296,11 +296,6 @@ final class StructureFireClient {
                                 .hasChunk(mesh.block.pos.getX() >> 4, mesh.block.pos.getZ() >> 4)
                         || !mesh.block.matches(mc.level.getBlockState(mesh.block.pos))) continue;
                 mesh.light = LevelRenderer.getLightColor(mc.level, mesh.block.pos.above());
-                mesh.motion.update(
-                        now / 20,
-                        mesh.block.pos.getX(),
-                        mesh.block.pos.getY(),
-                        mesh.block.pos.getZ());
                 for (var face : mesh.faces)
                     if (face != null) {
                         var neighbor = mesh.block.pos.relative(face.direction);
@@ -312,6 +307,16 @@ final class StructureFireClient {
                                                         + (camera.z - mesh.block.pos.getZ() - .5)
                                                                 * face.normal.z)
                                                 > -.1;
+                        if (face.visible
+                                && mesh.time < mesh.block.lastIgnition + mesh.block.fuel.flameTicks)
+                            face.motion.updateAt(
+                                    now / 20,
+                                    mesh.block.pos.getX(),
+                                    mesh.block.pos.getY(),
+                                    mesh.block.pos.getZ(),
+                                    mesh.block.pos.getX() + .5 + face.normal.x * .6,
+                                    mesh.block.pos.getY() + .5 + face.normal.y * .6,
+                                    mesh.block.pos.getZ() + .5 + face.normal.z * .6);
                     }
                 VISIBLE.add(mesh);
             }
@@ -392,16 +397,16 @@ final class StructureFireClient {
                             double height =
                                     (mesh.block.fuel == StructureFuel.LEAVES ? .82 : .78)
                                             * (.55 + .45 * fullness)
-                                            * mesh.motion.height(seed, strength);
+                                            * face.motion.height(seed, strength);
                             JoinedFlames.WORLD.add(
                                     point.x,
                                     point.y - .16,
                                     point.z,
                                     (.46 + seed * .16) * (.55 + .45 * fullness),
                                     height,
-                                    mesh.motion.up(),
+                                    face.motion.up(),
                                     seed,
-                                    strength * mesh.motion.brightness(seed),
+                                    strength * face.motion.brightness(seed),
                                     face.direction.getAxis() != Direction.Axis.Y);
                         }
                 }

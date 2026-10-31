@@ -86,6 +86,7 @@ public final class FlyingEmber extends Entity {
         if (!FireClocks.ticking(level, ChunkPos.asLong(blockPosition()))) return;
         int wind =
                 pool.wind.sample(
+                        level,
                         blockPosition().asLong(),
                         blockPosition().getX(),
                         blockPosition().getY(),

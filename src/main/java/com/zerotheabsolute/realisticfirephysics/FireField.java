@@ -253,6 +253,7 @@ public final class FireField extends SavedData {
         if (FireSettings.WIND_DRIVEN_SPREAD.get()) {
             int slot =
                     wind.sample(
+                            level,
                             block.asLong(),
                             block.getX(),
                             block.getY(),

@@ -1,6 +1,7 @@
 package com.zerotheabsolute.realisticfirephysics.wind;
 
 import net.minecraft.core.Direction;
+import net.minecraft.server.level.ServerLevel;
 
 import java.util.Arrays;
 
@@ -9,7 +10,7 @@ public final class SpreadWind {
     private static final int CAPACITY = 2048;
     private static final int SAMPLE_TICKS = 2;
     private static final double TICKS_PER_SECOND = 20;
-    private final WindCache wind = new WindCache();
+    private final WindCache ambient = new WindCache();
     private final long[] positions = new long[CAPACITY], times = new long[CAPACITY];
     private final double[] xs = new double[CAPACITY], zs = new double[CAPACITY];
     private final double[] scratch = new double[3];
@@ -18,11 +19,30 @@ public final class SpreadWind {
         clear();
     }
 
-    public int sample(long position, int x, int y, int z, long tick) {
+    public int sample(ServerLevel level, long position, int x, int y, int z, long tick) {
+        return sampleAt(level, position, x + .5, y + 1.2, z + .5, tick);
+    }
+
+    public int surface(
+            ServerLevel level, net.minecraft.core.BlockPos pos, Direction face, long tick) {
+        return sampleAt(
+                level,
+                pos.asLong() ^ (0x9e3779b97f4a7c15L * (face.ordinal() + 1)),
+                pos.getX() + .5 + face.getStepX() * .6,
+                pos.getY() + .5 + face.getStepY() * .6,
+                pos.getZ() + .5 + face.getStepZ() * .6,
+                tick);
+    }
+
+    private int sampleAt(
+            ServerLevel level, long position, double x, double y, double z, long tick) {
         int slot = (int) (position ^ (position >>> 32)) & (CAPACITY - 1);
         long time = Math.floorDiv(tick, SAMPLE_TICKS);
         if (positions[slot] != position || times[slot] != time) {
-            wind.sample(time * SAMPLE_TICKS / TICKS_PER_SECOND, x + .5, y + 1.2, z + .5, scratch);
+            if (com.zerotheabsolute.realisticfirephysics.FireSettings.TERRAIN_WIND.get())
+                ServerAirflow.get(level)
+                        .sample(time * SAMPLE_TICKS / TICKS_PER_SECOND, x, y, z, scratch);
+            else ambient.sample(time * SAMPLE_TICKS / TICKS_PER_SECOND, x, y, z, scratch);
             positions[slot] = position;
             times[slot] = time;
             xs[slot] = scratch[0];
@@ -47,6 +67,6 @@ public final class SpreadWind {
 
     public void clear() {
         Arrays.fill(times, Long.MIN_VALUE);
-        wind.clear();
+        ambient.clear();
     }
 }

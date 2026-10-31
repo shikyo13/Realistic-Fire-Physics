@@ -9,6 +9,8 @@ A fire overhaul for Minecraft Java 1.21.1 with spreading flames, glowing embers,
 - Jump onto burning ground to stamp out small patches. Partially burned grass and ferns retain their scorched appearance.
 - Flames bend with local gusts, and held or dropped torch flames trail their movement. Torch sound responds to airflow, with gentle crackling at rest and stronger flutter in motion.
 - Gusts also carry heat: fire advances faster downwind, and rising heat helps ground fires climb trunks and reach exposed canopies.
+- Solid terrain redirects nearby airflow, enclosed spaces shelter flames, and tree canopies remain porous to wind. Rising heat follows the local airflow as it travels upward.
+- Hot air subtly distorts the scenery behind flames while foreground objects remain clear. Distortion works with the standard renderer and supported Iris shader packs.
 - Rare hot embers drift away from established fires and can ignite dry ground, wood, or leaves when they land. They cool during flight, and water or exposed rain extinguishes them.
 - Fire sounds follow their sources, including thrown torches and falling timber, and fade with distance. Throwing a torch produces a brief rush of flame as it flies away.
 - Burning trunks and branches lose support, fall with their attached canopy, and settle into the terrain. Falling wood keeps burning and can ignite nearby fuel; water extinguishes it.
@@ -37,6 +39,7 @@ Settings are stored in `config/realisticfirephysics-server.toml`. A world-specif
 - `spreadWorkPerTick` and `structureWorkPerTick` control simulation work budgets.
 - `spreadSpeedMultiplier` controls ground and structure propagation speed. The default is `1.3`.
 - `windDrivenSpread` enables directional spread, and `risingHeatIgnites` enables upward heat transfer. Both default to `true`. `heatWorkPerTick` bounds heat-transfer terrain queries (default `1024`).
+- `terrainAwareWind` enables local terrain sheltering and airflow deflection. It defaults to `true`.
 - `embersIgnite` enables hot ember ignition. `emberReleaseChance` sets the chance per burning block's heat pulse, default `0.002`. Hot embers share their source fire's spread allowance, with at most 24 in flight per dimension.
 - `fallingLogs` enables support loss and falling wood. `maxFallingTimberBodies` caps simultaneously moving groups per dimension (default `24`), and `maxLogsPerFallingBody` limits each group (default `64` logs). Larger connected structures stay in place.
 - `rainExtinguishesTorches` controls whether rain extinguishes exposed torches.
@@ -49,6 +52,8 @@ Settings are stored in `config/realisticfirephysics-server.toml`. A world-specif
 Independent ignitions receive separate spread allowances. Connected fronts share one budget, with their previously burned coverage added together; joining fires does not reset that coverage. Finished burns retain their scars without preventing new fires elsewhere. Ground and structures share outbreak identity but have separate coverage limits. A separate safety ceiling bounds total live outbreak coverage in each dimension.
 
 Age and capacity cleanup are disabled by default. Enabling them removes eligible cold burn marks as chunks are visited, allowing remaining fuel there to burn again. Rain recovery gradually restores the ground surface; it does not rebuild consumed trees or structures. Replacing burned terrain removes its old scars. Cooled scars are stored with their chunks and are separate from active combustion, lighting and damage. Existing worlds and configuration files migrate automatically.
+
+Local rendering settings are in `config/realisticfirephysics-client.toml`. `heatHaze` enables heat distortion, and `heatHazeStrength` adjusts its intensity from `0` to `2` (default `1`).
 
 Operator commands:
 

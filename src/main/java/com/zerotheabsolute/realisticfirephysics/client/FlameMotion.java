@@ -11,7 +11,11 @@ final class FlameMotion {
     private Vec3 tilt = new Vec3(0, 1, 0);
 
     void update(double seconds, double x, double y, double z) {
-        WorldAirflow.sample(seconds, x + .5, y + 1.2, z + .5, wind);
+        updateAt(seconds, x, y, z, x + .5, y + 1.2, z + .5);
+    }
+
+    void updateAt(double seconds, double x, double y, double z, double ax, double ay, double az) {
+        WorldAirflow.sample(seconds, ax, ay, az, wind);
         speed = Math.sqrt(wind[0] * wind[0] + wind[2] * wind[2]);
         double density = FireEnvironment.ACTIVITY.intensity(x + .5, y + .5, z + .5);
         double dt = Double.isNaN(previousTime) ? 0 : Math.clamp(seconds - previousTime, 0, .25);

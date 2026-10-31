@@ -82,6 +82,12 @@ final class FireParticles {
     }
 
     static void offer(double x, double y, double z, float heat, float smoke) {
+        if (accepting) HeatHaze.offer(x, y, z, heat, false);
+        emit(x, y, z, heat, smoke);
+    }
+
+    /** Particle collection for callers that already group their heat volumes. */
+    static void emit(double x, double y, double z, float heat, float smoke) {
         if (!accepting
                 || camera.distanceToSqr(x, y, z) > VIEW_DISTANCE_SQUARED
                 || OFFERED.size() >= MAX_SOURCE_CELLS
@@ -111,6 +117,7 @@ final class FireParticles {
             double vx,
             double vy,
             double vz) {
+        if (accepting) HeatHaze.offer(x, y, z, strength, true);
         if (!accepting
                 || strength <= 0
                 || camera.distanceToSqr(x, y, z) > VIEW_DISTANCE_SQUARED
