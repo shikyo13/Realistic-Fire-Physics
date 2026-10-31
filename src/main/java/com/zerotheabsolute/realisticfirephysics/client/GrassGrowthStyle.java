@@ -4,5 +4,7 @@ package com.zerotheabsolute.realisticfirephysics.client;
 public enum GrassGrowthStyle {
     SCATTERED,
     PATCHES,
-    TEXTURE
+    TEXTURE,
+    TUFTS,
+    RUNNERS
 }

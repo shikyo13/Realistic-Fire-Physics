@@ -19,8 +19,8 @@ public final class FireClientSettings {
                         .defineInRange("heatHazeStrength", 1.0, 0.0, 2.0);
         GRASS_GROWTH_STYLE =
                 builder.comment(
-                                "Grass recovery appearance: scattered pixels, connected patches, or"
-                                    + " native texture details.")
+                                "Grass recovery appearance: SCATTERED pixels, PATCHES, TEXTURE"
+                                    + " paths, small TUFTS, or creeping RUNNERS.")
                         .defineEnum("grassGrowthStyle", GrassGrowthStyle.SCATTERED);
         SPEC = builder.build();
     }

@@ -60,8 +60,14 @@ final class GrassGrowthFront {
         this.footprint = footprint;
         footprintPixels = Long.bitCount(footprint) * 4;
         System.arraycopy(scatteredDirections, 0, directions, 0, directions.length);
-        if (style == GrassGrowthStyle.TEXTURE) {
-            textureOrder = GrassTextureGrowth.order(texture, scattered, footprint, directions);
+        if (style == GrassGrowthStyle.TEXTURE
+                || style == GrassGrowthStyle.TUFTS
+                || style == GrassGrowthStyle.RUNNERS) {
+            textureOrder =
+                    style == GrassGrowthStyle.TEXTURE
+                            ? GrassTextureGrowth.order(texture, scattered, footprint, directions)
+                            : GrassMicroGrowth.order(
+                                    style, texture, scattered, footprint, directions);
             Arrays.fill(progress, Float.NaN);
             return;
         }
@@ -77,7 +83,7 @@ final class GrassGrowthFront {
                             case PATCHES ->
                                     CLUSTER_WEIGHT * clustered(ox + x, oz + z)
                                             + (1 - CLUSTER_WEIGHT) * scattered[i];
-                            case TEXTURE ->
+                            case TEXTURE, TUFTS, RUNNERS ->
                                     throw new IllegalStateException(
                                             "Connected texture order is prepared separately");
                         };

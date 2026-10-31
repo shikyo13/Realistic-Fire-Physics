@@ -175,7 +175,7 @@ class GrassGrowthFrontTest {
             assertFalse(front.movingChanged());
             assertEquals(0, area(front, 1, 0, 0));
         }
-        assertEquals(3, appearances.size());
+        assertEquals(GrassGrowthStyle.values().length, appearances.size());
         front.configure(GrassGrowthStyle.SCATTERED, null);
         front.update(values(.43f, 0, -1L));
         assertEquals(original, movingVertices(front));
