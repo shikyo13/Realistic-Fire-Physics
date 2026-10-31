@@ -11,7 +11,8 @@ final class GrassGrowthFront {
     static final int RESOLUTION = 16;
     private static final float PIXEL_FILL_SHARE = .045f;
     private static final int CLUSTER_SCALE = 4;
-    private static final float CLUSTER_WEIGHT = .85f, TEXTURE_WEIGHT = .82f;
+    private static final float CLUSTER_WEIGHT = .85f;
+    private static final float CONNECTED_FILL_PIXELS = 3;
     private static final float FILL_INTERVAL =
             PIXEL_FILL_SHARE * GrassRegrowth.LAYERS_PER_INTERVAL * GrassRegrowth.SPREAD_FRACTION;
     private final float[] starts = new float[RESOLUTION * RESOLUTION];
@@ -20,6 +21,9 @@ final class GrassGrowthFront {
     private final byte[] scatteredDirections = new byte[starts.length];
     private final long positionSeed;
     private GrassGrowthStyle style;
+    private int[] textureOrder;
+    private long footprint = -1L;
+    private int footprintPixels;
     private final int[] rows = new int[RESOLUTION];
     private final int[] mergedRows = new int[RESOLUTION];
     private final int[] moving = new int[starts.length];
@@ -48,8 +52,20 @@ final class GrassGrowthFront {
     }
 
     void configure(GrassGrowthStyle style, float[] texture) {
+        configure(style, texture, -1L);
+    }
+
+    void configure(GrassGrowthStyle style, float[] texture, long footprint) {
         this.style = style;
+        this.footprint = footprint;
+        footprintPixels = Long.bitCount(footprint) * 4;
         System.arraycopy(scatteredDirections, 0, directions, 0, directions.length);
+        if (style == GrassGrowthStyle.TEXTURE) {
+            textureOrder = GrassTextureGrowth.order(texture, scattered, footprint, directions);
+            Arrays.fill(progress, Float.NaN);
+            return;
+        }
+        textureOrder = null;
         int ox = BlockPos.getX(positionSeed) * RESOLUTION;
         int oz = BlockPos.getZ(positionSeed) * RESOLUTION;
         for (int z = 0; z < RESOLUTION; z++)
@@ -62,8 +78,8 @@ final class GrassGrowthFront {
                                     CLUSTER_WEIGHT * clustered(ox + x, oz + z)
                                             + (1 - CLUSTER_WEIGHT) * scattered[i];
                             case TEXTURE ->
-                                    TEXTURE_WEIGHT * (texture == null ? .5f : texture[i])
-                                            + (1 - TEXTURE_WEIGHT) * scattered[i];
+                                    throw new IllegalStateException(
+                                            "Connected texture order is prepared separately");
                         };
                 starts[i] = Math.clamp(value, 0, 1) * (1 - FILL_INTERVAL);
             }
@@ -125,12 +141,32 @@ final class GrassGrowthFront {
         System.arraycopy(progress, 0, this.progress, 0, this.progress.length);
         movingCount = 0;
         boolean changed = false;
+        float connectedPhase = 0;
+        if (textureOrder != null && footprintPixels > 0) {
+            float total = 0;
+            long cells = footprint;
+            while (cells != 0) {
+                total += Math.clamp(progress[Long.numberOfTrailingZeros(cells)], 0, 1);
+                cells &= cells - 1;
+            }
+            connectedPhase =
+                    total * 4 / footprintPixels * (footprintPixels + CONNECTED_FILL_PIXELS - 1);
+        }
         for (int z = 0; z < RESOLUTION; z++) {
             int full = 0;
             for (int x = 0; x < RESOLUTION; x++) {
                 float t = progress[(z / 2) * 8 + x / 2];
                 int pixel = z * RESOLUTION + x;
-                float amount = Math.clamp((t - starts[pixel]) / FILL_INTERVAL, 0, 1);
+                float amount =
+                        textureOrder == null
+                                ? Math.clamp((t - starts[pixel]) / FILL_INTERVAL, 0, 1)
+                                : textureOrder[pixel] < 0
+                                        ? 0
+                                        : Math.clamp(
+                                                (connectedPhase - textureOrder[pixel])
+                                                        / CONNECTED_FILL_PIXELS,
+                                                0,
+                                                1);
                 float previous = amounts[pixel];
                 if (amount != previous
                         && ((previous > 0 && previous < 1) || (amount > 0 && amount < 1)))

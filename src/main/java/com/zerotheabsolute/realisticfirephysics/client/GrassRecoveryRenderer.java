@@ -252,6 +252,7 @@ final class GrassRecoveryRenderer {
         BlockState state;
         GrassSurface[] materials;
         float[] texturePattern;
+        long footprint;
         int light;
         double refreshAt;
         double retireAt = Double.POSITIVE_INFINITY;
@@ -268,6 +269,7 @@ final class GrassRecoveryRenderer {
 
         boolean prepare(Minecraft mc, double now) {
             boolean changed = false;
+            boolean patternChanged = false;
             if (materials == null || now >= refreshAt) {
                 var next = mc.level.getBlockState(pos);
                 boolean nextVisible =
@@ -280,6 +282,7 @@ final class GrassRecoveryRenderer {
                 if (!visible) return changed;
                 if (next != state || materials == null) {
                     changed = true;
+                    patternChanged = true;
                     state = next;
                     int tint = mc.getBlockColors().getColor(state, mc.level, pos, 0);
                     var quads = ScorchedTerrainModel.originalTop(state, pos);
@@ -294,8 +297,10 @@ final class GrassRecoveryRenderer {
                 }
             }
             var style = FireClientSettings.GRASS_GROWTH_STYLE.get();
-            if (changed || front.style() != style) {
-                front.configure(style, texturePattern);
+            long nextFootprint = ground.cells() | ground.grown();
+            if (patternChanged || front.style() != style || footprint != nextFootprint) {
+                footprint = nextFootprint;
+                front.configure(style, texturePattern, footprint);
                 changed = true;
             }
             return changed;

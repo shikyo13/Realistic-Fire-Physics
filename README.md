@@ -55,7 +55,7 @@ Age and capacity cleanup are disabled by default. Enabling them removes eligible
 
 Local rendering settings are in `config/realisticfirephysics-client.toml`. `heatHaze` enables heat distortion, and `heatHazeStrength` adjusts its intensity from `0` to `2` (default `1`).
 
-`grassGrowthStyle` changes the appearance of recovering grass without changing its recovery rate. `SCATTERED` restores individual texture pixels, `PATCHES` joins them into small clusters, and `TEXTURE` follows details in the grass texture. Each style preserves the block's original texture and biome color over the scorched soil.
+`grassGrowthStyle` changes the appearance of recovering grass without changing its recovery rate. `SCATTERED` restores individual texture pixels, `PATCHES` joins them into small clusters, and `TEXTURE` grows connected paths through the grass texture from small starting patches. Each style preserves the block's original texture and biome color over the scorched soil.
 
 Operator commands:
 
