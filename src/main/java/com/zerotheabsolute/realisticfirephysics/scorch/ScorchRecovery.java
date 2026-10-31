@@ -52,14 +52,15 @@ final class ScorchRecovery {
                 chunk.setUnsaved(true);
                 continue;
             }
-            long edge =
-                    ScorchBits.recoveryEdge(
-                            g.cells() & ~g.growth().spreading(),
+            long sources =
+                    GrassColonization.sources(
+                            g,
                             neighbor(archive, level, pos.west()),
                             neighbor(archive, level, pos.east()),
                             neighbor(archive, level, pos.north()),
-                            neighbor(archive, level, pos.south()));
-            var next = GrassRegrowth.advance(g, edge, data.rainClock, interval(), key);
+                            neighbor(archive, level, pos.south()),
+                            key);
+            var next = GrassRegrowth.advance(g, sources, data.rainClock, interval(), key);
             if (next.cells() == 0) data.ground.remove(key);
             else data.ground.put(key, next);
             if (GrassRegrowth.visuallyChanged(g, next)) archive.dirty(level, pos, data);
@@ -79,7 +80,8 @@ final class ScorchRecovery {
 
     private static long neighbor(ScorchArchive archive, ServerLevel level, BlockPos pos) {
         if (!level.hasChunkAt(pos)) return -1L;
-        if (!FuelRules.ground(level.getBlockState(pos))) return 0;
+        // Water, stone and air cannot supply a living grass front.
+        if (!FuelRules.ground(level.getBlockState(pos))) return -1L;
         var ground = archive.ground(level, pos);
         if (ground != null) return ground.cells() & ~ground.growth().spreading();
         return FireField.get(level).hasHeat(pos) ? -1L : 0;

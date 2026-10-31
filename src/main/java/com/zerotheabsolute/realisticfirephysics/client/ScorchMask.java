@@ -35,6 +35,10 @@ final class ScorchMask {
         return block == null ? FuelRules.ground(state) : state.is(block);
     }
 
+    boolean ground() {
+        return block == null;
+    }
+
     boolean sameCoverage(ScorchMask other) {
         return other != null
                 && block == other.block

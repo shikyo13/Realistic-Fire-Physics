@@ -35,7 +35,7 @@ import java.util.concurrent.ConcurrentHashMap;
 /** Scorch the original terrain mesh so depth, shadows, cutouts, and shader wind remain aligned. */
 final class ScorchedTerrainModel extends BakedModelWrapper<BakedModel> {
     private static final int VERTEX_STRIDE = 8, COLOR = 3, U = 4, V = 5;
-    private static final float CHAR_BRIGHTNESS = .13f;
+    private static final float CHAR_BRIGHTNESS = .13f, SOIL_CHAR_BRIGHTNESS = .28f;
     private static final float DRY_RED = .9f, DRY_GREEN = .65f, DRY_BLUE = .24f;
     private static final int[] FLOAT_FIELDS = {0, 1, 2, U, V};
     private static final int CORNER_WIDTH =
@@ -47,7 +47,7 @@ final class ScorchedTerrainModel extends BakedModelWrapper<BakedModel> {
 
     private record QuadKey(BakedQuad source, int tint) {}
 
-    private record UniformKey(BakedQuad source, int subdivisions) {}
+    private record UniformKey(BakedQuad source, int subdivisions, boolean ground) {}
 
     private static final int MAX_UNIFORM_QUADS = 4096;
     private static final ScorchCellMeshes CELLS = new ScorchCellMeshes(32768);
@@ -63,7 +63,8 @@ final class ScorchedTerrainModel extends BakedModelWrapper<BakedModel> {
                                                 null,
                                                 0xffffff,
                                                 colored,
-                                                key.subdivisions());
+                                                key.subdivisions(),
+                                                key.ground());
                                         return List.copyOf(colored);
                                     }));
 
@@ -100,6 +101,7 @@ final class ScorchedTerrainModel extends BakedModelWrapper<BakedModel> {
         }
         UNIFORM.invalidateAll();
         CELLS.clear();
+        GrassTexturePattern.clear();
         GrassRecoveryRenderer.reload();
     }
 
@@ -133,7 +135,10 @@ final class ScorchedTerrainModel extends BakedModelWrapper<BakedModel> {
             if (mask.uniformlyCharred(quad.getDirection())) {
                 result.addAll(
                         UNIFORM.getUnchecked(
-                                new UniformKey(quad, mask.subdivisions(quad.getDirection()))));
+                                new UniformKey(
+                                        quad,
+                                        mask.subdivisions(quad.getDirection()),
+                                        mask.ground())));
                 continue;
             }
             result.addAll(
@@ -162,11 +167,16 @@ final class ScorchedTerrainModel extends BakedModelWrapper<BakedModel> {
     private static void subdivide(
             BakedQuad quad, ScorchMask mask, int tint, List<BakedQuad> output) {
         int steps = mask.subdivisions(quad.getDirection());
-        subdivide(quad, mask, tint, output, steps);
+        subdivide(quad, mask, tint, output, steps, mask.ground());
     }
 
     private static void subdivide(
-            BakedQuad quad, ScorchMask mask, int tint, List<BakedQuad> output, int steps) {
+            BakedQuad quad,
+            ScorchMask mask,
+            int tint,
+            List<BakedQuad> output,
+            int steps,
+            boolean ground) {
         if (steps == 0) {
             output.add(quad);
             return;
@@ -182,7 +192,8 @@ final class ScorchedTerrainModel extends BakedModelWrapper<BakedModel> {
                         x / (double) steps,
                         y / (double) steps,
                         mask,
-                        tint);
+                        tint,
+                        ground);
         for (int y = 0; y < steps; y++)
             for (int x = 0; x < steps; x++) output.add(CELLS.get(quad, grid, width, x, y));
     }
@@ -194,7 +205,8 @@ final class ScorchedTerrainModel extends BakedModelWrapper<BakedModel> {
             double s,
             double t,
             ScorchMask mask,
-            int tint) {
+            int tint,
+            boolean ground) {
         int base = vertex * VERTEX_STRIDE;
         int[] source = quad.getVertices();
         System.arraycopy(source, 0, target, base, VERTEX_STRIDE);
@@ -214,9 +226,10 @@ final class ScorchedTerrainModel extends BakedModelWrapper<BakedModel> {
         tr += (DRY_RED - tr) * dry;
         tg += (DRY_GREEN - tg) * dry;
         tb += (DRY_BLUE - tb) * dry;
-        tr += (CHAR_BRIGHTNESS - tr) * amount;
-        tg += (CHAR_BRIGHTNESS - tg) * amount;
-        tb += (CHAR_BRIGHTNESS - tb) * amount;
+        float charBrightness = ground ? SOIL_CHAR_BRIGHTNESS : CHAR_BRIGHTNESS;
+        tr += (charBrightness - tr) * amount;
+        tg += (charBrightness - tg) * amount;
+        tb += (charBrightness - tb) * amount;
         target[base + COLOR] =
                 (color & 0xff000000) | (int) (r * tr) | (int) (g * tg) << 8 | (int) (b * tb) << 16;
     }

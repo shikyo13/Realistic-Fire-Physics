@@ -205,6 +205,11 @@ public final class ScorchArchive extends SavedData {
     }
 
     public void tick(ServerLevel level) {
+        if (!level.tickRateManager().runsNormally()) {
+            // Commands and chunk watches may still change data while world simulation is paused.
+            flush(level);
+            return;
+        }
         long now = level.getGameTime();
         int minutes = FireSettings.RAIN_RECOVERY_MINUTES.get();
         if (minutes > 0 && level.isRaining())

@@ -28,8 +28,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 @EventBusSubscriber(modid = RealisticFirePhysics.MOD_ID, value = Dist.CLIENT)
 final class GrassRecoveryRenderer {
     private static final int MESH_BUFFER_BYTES = 64 * 1024, LIGHT_REFRESH_TICKS = 20;
-    private static final int REGION_SHIFT = 3,
-            REGION_WIDTH = 1 << REGION_SHIFT;
+    private static final int REGION_SHIFT = 3, REGION_WIDTH = 1 << REGION_SHIFT;
     private static final float SURFACE_OFFSET = .001f;
     private static final int TERRAIN_HANDOFF_TICKS = 20;
     private static final ChunkScars.Ground RESTORED =
@@ -252,6 +251,7 @@ final class GrassRecoveryRenderer {
         ChunkScars.Ground ground;
         BlockState state;
         GrassSurface[] materials;
+        float[] texturePattern;
         int light;
         double refreshAt;
         double retireAt = Double.POSITIVE_INFINITY;
@@ -282,11 +282,21 @@ final class GrassRecoveryRenderer {
                     changed = true;
                     state = next;
                     int tint = mc.getBlockColors().getColor(state, mc.level, pos, 0);
+                    var quads = ScorchedTerrainModel.originalTop(state, pos);
                     materials =
-                            ScorchedTerrainModel.originalTop(state, pos).stream()
+                            quads.stream()
                                     .map(q -> new GrassSurface(q, tint))
                                     .toArray(GrassSurface[]::new);
+                    texturePattern =
+                            quads.isEmpty()
+                                    ? null
+                                    : GrassTexturePattern.mapped(quads.getFirst(), materials[0]);
                 }
+            }
+            var style = FireClientSettings.GRASS_GROWTH_STYLE.get();
+            if (changed || front.style() != style) {
+                front.configure(style, texturePattern);
+                changed = true;
             }
             return changed;
         }

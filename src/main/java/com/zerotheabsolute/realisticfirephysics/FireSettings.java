@@ -91,7 +91,7 @@ public final class FireSettings {
         TERRAIN_WIND =
                 builder.comment(
                                 "Nearby solid terrain redirects gusts and shelters enclosed"
-                                    + " flames.")
+                                        + " flames.")
                         .define("terrainAwareWind", true);
         RISING_HEAT =
                 builder.comment("Established flames heat exposed fuel above and beside them.")
@@ -109,9 +109,10 @@ public final class FireSettings {
                         .defineInRange("emberReleaseChance", .002, 0, 1);
         RAIN_RECOVERY_MINUTES =
                 builder.comment(
-                                "Minutes of exposed rain for native grass to advance two blocks"
-                                        + " inward from the edges of cooled ground. Zero disables"
-                                        + " recovery. Unloaded or inactive chunks pause recovery.")
+                                "Minutes of exposed rain for native grass to spread about two"
+                                    + " blocks. Growth starts beside living grass and at scattered"
+                                    + " soil sites that survive burning. Zero disables recovery."
+                                    + " Unloaded or inactive chunks pause recovery.")
                         .defineInRange("rainRecoveryMinutes", 30, 0, 10080);
         HISTORY_RETENTION_SECONDS =
                 builder.comment(

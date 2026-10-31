@@ -150,4 +150,34 @@ class GrassGrowthFrontTest {
                         vertices.addAll(List.of(ax, az, bx, bz, cx, cz, dx, dz)));
         return vertices;
     }
+
+    @Test
+    void eachPatternPreservesCoverageAndCanReturnToTheOriginalGeometry() {
+        var front = new GrassGrowthFront(3000L << 38);
+        float[] texture = new float[256];
+        for (int i = 0; i < texture.length; i++) texture[i] = (i % 13) / 12f;
+        front.update(values(.43f, 0, -1L));
+        var original = movingVertices(front);
+        var appearances = new java.util.HashSet<List<Float>>();
+        for (var style : GrassGrowthStyle.values()) {
+            front.configure(style, texture);
+            double previous = 0;
+            for (int i = 0; i <= 1000; i++) {
+                double current = area(front, i / 1000f, 0, -1L);
+                assertTrue(current >= previous - 1e-6);
+                assertTrue(current - previous < .02);
+                previous = current;
+            }
+            assertEquals(1, previous, 1e-6);
+            front.update(values(.43f, 0, -1L));
+            appearances.add(movingVertices(front));
+            assertFalse(front.update(values(.43f, 0, -1L)));
+            assertFalse(front.movingChanged());
+            assertEquals(0, area(front, 1, 0, 0));
+        }
+        assertEquals(3, appearances.size());
+        front.configure(GrassGrowthStyle.SCATTERED, null);
+        front.update(values(.43f, 0, -1L));
+        assertEquals(original, movingVertices(front));
+    }
 }

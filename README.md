@@ -5,7 +5,7 @@ A fire overhaul for Minecraft Java 1.21.1 with spreading flames, glowing embers,
 ## Features
 
 - Fire spreads across ground, wood, and leaves at finer than block resolution. Stone, gaps, water, and removed fuel interrupt its path.
-- Burning surfaces glow and char. Ground continues to smolder after the flames subside, then cools. Burn marks survive saving and reopening. Exposed rain slowly restores cooled ground as pixels of the original grass texture grow inward from the edges of scorched soil.
+- Burning surfaces glow and char. Ground continues to smolder after the flames subside, then cools. Burn marks survive saving and reopening. Exposed rain slowly restores cooled ground as pixels of the original grass texture spread from neighboring grass and scattered surviving patches.
 - Jump onto burning ground to stamp out small patches. Partially burned grass and ferns retain their scorched appearance.
 - Flames bend with local gusts, and held or dropped torch flames trail their movement. Torch sound responds to airflow, with gentle crackling at rest and stronger flutter in motion.
 - Gusts also carry heat: fire advances faster downwind, and rising heat helps ground fires climb trunks and reach exposed canopies.
@@ -44,7 +44,7 @@ Settings are stored in `config/realisticfirephysics-server.toml`. A world-specif
 - `fallingLogs` enables support loss and falling wood. `maxFallingTimberBodies` caps simultaneously moving groups per dimension (default `24`), and `maxLogsPerFallingBody` limits each group (default `64` logs). Larger connected structures stay in place.
 - `rainExtinguishesTorches` controls whether rain extinguishes exposed torches.
 - `lavaIgnitesGround` and `lightningIgnitesGround` control ignition from lava and lightning.
-- `rainRecoveryMinutes` sets the regrowth rate during exposed rain. Pixels of the original grass texture grow smoothly inward from the burn perimeter, over unchanged scorched soil. The default is `30` minutes for the front to advance two blocks; larger burned areas take longer to fill. Recovery pauses in inactive chunks; roofs shelter the ground. Set it to `0` to preserve ground scars.
+- `rainRecoveryMinutes` sets the regrowth rate during exposed rain. Pixels of the original grass texture spread from living grass and scattered surviving root or seed sites, joining over unchanged scorched soil. The default is `30` minutes for growth to travel about two blocks; completion depends on the positions of those sources. Recovery pauses in inactive chunks; roofs shelter the ground. Set it to `0` to preserve ground scars.
 - `burnHistoryRetentionSeconds` optionally removes cold scars after this many seconds. The default, `0`, disables age-based cleanup.
 - `maxRetainedGroundCells` and `maxRetainedStructureBlocks` optionally set history storage targets. Both default to `0`, which disables capacity cleanup. Active fire and smoldering material are protected even when a target is exceeded.
 - `historyCleanupWorkPerTick` controls the amount of optional cleanup work per tick.
@@ -54,6 +54,8 @@ Independent ignitions receive separate spread allowances. Connected fronts share
 Age and capacity cleanup are disabled by default. Enabling them removes eligible cold burn marks as chunks are visited, allowing remaining fuel there to burn again. Rain recovery gradually restores the ground surface; it does not rebuild consumed trees or structures. Replacing burned terrain removes its old scars. Cooled scars are stored with their chunks and are separate from active combustion, lighting and damage. Existing worlds and configuration files migrate automatically.
 
 Local rendering settings are in `config/realisticfirephysics-client.toml`. `heatHaze` enables heat distortion, and `heatHazeStrength` adjusts its intensity from `0` to `2` (default `1`).
+
+`grassGrowthStyle` changes the appearance of recovering grass without changing its recovery rate. `SCATTERED` restores individual texture pixels, `PATCHES` joins them into small clusters, and `TEXTURE` follows details in the grass texture. Each style preserves the block's original texture and biome color over the scorched soil.
 
 Operator commands:
 
