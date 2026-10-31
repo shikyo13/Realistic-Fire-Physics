@@ -122,9 +122,10 @@ final class GroundBurnMasks {
                             var sample = patch == null ? null : patch[ScorchBits.index(u, v)];
                             if (sample == null) {
                                 var cold = scars[at];
-                                // Passive scorch belongs to its recorded block. Neighbor blending
-                                // must not paint a dark rim onto grass that has already recovered.
-                                if (scars[4] != null
+                                // Active burns blend with stored neighbors across shared edges.
+                                // Passive scorch still requires an owned record so it cannot
+                                // darken grass that has already recovered.
+                                if ((scars[4] != null || neighbors[4] != null)
                                         && cold != null
                                         && ScorchBits.contains(
                                                 cold.cells() | cold.grown(),
