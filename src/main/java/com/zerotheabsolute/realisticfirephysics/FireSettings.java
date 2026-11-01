@@ -9,6 +9,7 @@ public final class FireSettings {
     public static final int GROUND_FLAME_TICKS = 26;
     public static final int VEGETATION_FLAME_TICKS = 105;
     public static final int SMOLDER_TICKS = 400;
+    public static final int QUENCHED_EMBER_FADE_TICKS = 20;
     public static final int TORCH_DRY_TICKS = 38;
     public static final int TORCH_IGNITE_TICKS = 75;
     public static final int TORCH_DRY_RADIUS = 3;

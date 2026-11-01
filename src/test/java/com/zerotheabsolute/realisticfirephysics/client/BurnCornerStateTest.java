@@ -106,4 +106,43 @@ class BurnCornerStateTest {
     private static float clamp(double value) {
         return (float) Math.clamp(value, 0, 1);
     }
+
+    @Test
+    void quenchingStopsHeatImmediatelyButPreservesContinuousEmberCooling() {
+        var burning = sample(1, 100, false);
+        var samples = new FirePacket.Sample[] {burning};
+        var state = new BurnCornerState(samples);
+        long stopped = 220;
+        state.update(stopped);
+        float initialEmber = state.ember;
+        samples[0] = burning.quench(stopped);
+        state.invalidate();
+        state.update(stopped);
+        assertEquals(0, state.heat);
+        assertEquals(initialEmber, state.ember, .000001);
+        float previous = state.ember;
+        for (double now = stopped; now < stopped + FireSettings.QUENCHED_EMBER_FADE_TICKS; now += .125) {
+            state.update(now);
+            assertEquals(0, state.heat);
+            assertTrue(state.ember > 0 && state.ember <= previous);
+            previous = state.ember;
+        }
+        state.update(FireField.emberEnd(samples[0]));
+        assertEquals(0, state.ember, .000001);
+        assertEquals(.25, state.cover, .000001);
+    }
+
+    @Test
+    void quenchingCannotExtendTheNaturalEmberLifetime() {
+        var burning = sample(1, 100, false);
+        long naturalEnd = FireField.emberEnd(burning);
+        var quenched = burning.quench(naturalEnd - 2);
+        assertEquals(naturalEnd, FireField.emberEnd(quenched));
+        var state = new BurnCornerState(new FirePacket.Sample[] {quenched});
+        state.update(naturalEnd - 1.5);
+        assertTrue(state.ember > 0 && state.ember < .01);
+        state.update(naturalEnd);
+        assertEquals(0, state.ember, .000001);
+        assertTrue(FireField.emberEnd(sample(1, 100, true)) <= naturalEnd);
+    }
 }

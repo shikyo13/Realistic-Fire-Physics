@@ -143,6 +143,14 @@ public final class FireField extends SavedData {
         return lifetime(fuel) + FireSettings.SMOLDER_TICKS;
     }
 
+    /** Quenching stops gameplay heat immediately while residual ember light cools briefly. */
+    public static long emberEnd(FirePacket.Sample sample) {
+        long naturalEnd = sample.ignition() + coolTime(sample.fuel());
+        if (!sample.quenched()) return naturalEnd;
+        if (sample.stoppedAt() < 0) return sample.ignition();
+        return Math.min(naturalEnd, sample.stoppedAt() + FireSettings.QUENCHED_EMBER_FADE_TICKS);
+    }
+
     private static long hash(Site s) {
         long n = (s.x * 73428767L) ^ (s.z * 912931L) ^ (s.y * 374761393L);
         n = (n ^ (n >>> 13)) * 1274126177L;
@@ -594,9 +602,7 @@ public final class FireField extends SavedData {
                 var site = new Site(pos.getX() * 8 + x, pos.getY(), pos.getZ() * 8 + z);
                 var sample = samples.get(site);
                 if (sample == null) continue;
-                if (local - sample.ignition() < 10
-                        || !sample.quenched()
-                                && local - sample.ignition() < coolTime(sample.fuel()))
+                if (local - sample.ignition() < 10 || local < emberEnd(sample))
                     return false;
                 bits |= 1L << (z * 8 + x);
                 exposure += VegetationScorch.exposure(sample, local);

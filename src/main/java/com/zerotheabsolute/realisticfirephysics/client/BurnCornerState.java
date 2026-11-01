@@ -101,7 +101,22 @@ final class BurnCornerState {
                 continue;
             }
             ramp(COVER, age, SCORCH_TICKS, running);
-            if (sample.quenched()) continue;
+            if (sample.quenched()) {
+                if (sample.stoppedAt() >= 0) {
+                    long end = FireField.emberEnd(sample);
+                    double duration = end - sample.stoppedAt();
+                    if (duration > 0) {
+                        double atStop = clamp((sample.ignition() + FireField.coolTime(sample.fuel())
+                                - sample.stoppedAt()) / (double) FireSettings.SMOLDER_TICKS);
+                        start[EMBER] += atStop * clamp((end - local) / duration) * CORNER_WEIGHT;
+                        if (running && local >= sample.stoppedAt() && local < end) {
+                            slope[EMBER] -= atStop * CORNER_WEIGHT / duration;
+                            nextChange = Math.min(nextChange, now + end - local);
+                        }
+                    }
+                }
+                continue;
+            }
             int lifetime = FireField.lifetime(sample.fuel());
             int fade = fadeTicks(sample.fuel());
             start[HEAT] +=

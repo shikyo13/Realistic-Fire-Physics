@@ -400,7 +400,7 @@ public final class FireClient {
                 effectsUntil =
                         Math.max(
                                 effectsUntil,
-                                sample.ignition() + FireField.coolTime(sample.fuel()));
+                                FireField.emberEnd(sample));
             }
         }
 
