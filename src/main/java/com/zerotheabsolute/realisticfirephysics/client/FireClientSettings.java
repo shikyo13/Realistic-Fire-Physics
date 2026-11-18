@@ -9,6 +9,7 @@ public final class FireClientSettings {
     public static final ModConfigSpec.DoubleValue HEAT_HAZE_STRENGTH;
     public static final ModConfigSpec.EnumValue<GrassGrowthStyle> GRASS_GROWTH_STYLE;
     public static final ModConfigSpec.EnumValue<GrassGrowthEffect> GRASS_GROWTH_EFFECT;
+    public static final ModConfigSpec.BooleanValue RETAINED_GEOMETRY;
 
     static {
         var builder = new ModConfigSpec.Builder();
@@ -28,6 +29,12 @@ public final class FireClientSettings {
                                 "Emerging grass treatment: NONE, FRESH color, RELIEF lighting, or"
                                     + " EMERGING pixel shapes.")
                         .defineEnum("grassGrowthEffect", GrassGrowthEffect.NONE);
+        RETAINED_GEOMETRY =
+                builder.comment(
+                                "Keep burning ground and block surfaces on the GPU between frames."
+                                    + " Disable only if another rendering mod shows missing or"
+                                    + " frozen fire glow.")
+                        .define("retainedFireGeometry", true);
         SPEC = builder.build();
     }
 

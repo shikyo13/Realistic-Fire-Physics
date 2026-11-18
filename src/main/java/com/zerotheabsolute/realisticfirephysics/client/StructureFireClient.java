@@ -42,9 +42,101 @@ final class StructureFireClient {
     private static final Long2ObjectOpenHashMap<Mesh> MESHES = new Long2ObjectOpenHashMap<>();
     private static final Long2ObjectOpenHashMap<Mesh> ACTIVE = new Long2ObjectOpenHashMap<>();
     private static final List<Mesh> VISIBLE = new ArrayList<>();
+    /** Burning surfaces grouped into 8-block regions, each kept as retained meshes per layer. */
+    private static final Long2ObjectOpenHashMap<Region> REGIONS = new Long2ObjectOpenHashMap<>();
+    private static final List<Region> TOUCHED = new ArrayList<>();
+    private static final List<RetainedQuads<Corner>> DRAWN = new ArrayList<>();
+    private static final int REGION_IDLE_FRAMES = 600;
+    /** A surface quad is keyed by its first corner, which starts exactly one cell of its face. */
+    private static final RetainedQuads.Writer<Corner> SURFACE =
+            (out, a, ax, ay, az, colors, first) -> {
+                var face = a.face;
+                surfaceCorner(out, a, ax, ay, az, colors[first]);
+                surfaceCorner(out, face.corner(a.u, a.v + 1), ax, ay, az, colors[first + 1]);
+                surfaceCorner(out, face.corner(a.u + 1, a.v + 1), ax, ay, az, colors[first + 2]);
+                surfaceCorner(out, face.corner(a.u + 1, a.v), ax, ay, az, colors[first + 3]);
+            };
     private static String dimension = "";
     private static long frame;
     private static boolean lightingPending;
+
+    private static final class Region {
+        final long key;
+        final AABB bounds;
+        final List<Mesh> meshes = new ArrayList<>();
+        final RetainedQuads<Corner> heat = new RetainedQuads<>();
+        final RetainedQuads<Corner> ember = new RetainedQuads<>();
+        long frame = -1;
+        boolean visible;
+
+        Region(long key) {
+            this.key = key;
+            var origin = BlockPos.of(key);
+            bounds =
+                    new AABB(
+                                    origin.getX() * 8,
+                                    origin.getY() * 8,
+                                    origin.getZ() * 8,
+                                    origin.getX() * 8 + 8,
+                                    origin.getY() * 8 + 8,
+                                    origin.getZ() * 8 + 8)
+                            .inflate(SURFACE_OFFSET * 2);
+        }
+
+        RetainedQuads<Corner> mesh(ShaderPackRendering.GroundLayer layer) {
+            return layer == ShaderPackRendering.GroundLayer.HEAT ? heat : ember;
+        }
+
+        void close() {
+            heat.close();
+            ember.close();
+        }
+    }
+
+    /** This frame's region for a surface, marking its visibility on first use. */
+    private static Region region(BlockPos pos, net.minecraft.client.renderer.culling.Frustum frustum) {
+        long key = BlockPos.asLong(pos.getX() >> 3, pos.getY() >> 3, pos.getZ() >> 3);
+        var region = REGIONS.computeIfAbsent(key, Region::new);
+        if (region.frame != frame) {
+            region.frame = frame;
+            region.meshes.clear();
+            region.visible = frustum.isVisible(region.bounds);
+            TOUCHED.add(region);
+        }
+        return region;
+    }
+
+    // Same attributes as the immediate corner, relative to the retained anchor. Both retained
+    // layers are emissive, so they are always drawn at full brightness.
+    private static void surfaceCorner(
+            VertexConsumer out, Corner c, double ax, double ay, double az, int color) {
+        var p = c.point;
+        var n = c.face.normal;
+        RetainedQuads.setColor(
+                        out.addVertex((float) (p.x - ax), (float) (p.y - ay), (float) (p.z - az)),
+                        color)
+                .setUv(c.textureU, c.textureV)
+                .setOverlay(OverlayTexture.NO_OVERLAY)
+                .setLight(LightTexture.FULL_BRIGHT)
+                .setNormal((float) n.x, (float) n.y, (float) n.z);
+    }
+
+    private static void closeRegions() {
+        for (var region : REGIONS.values()) region.close();
+        REGIONS.clear();
+        TOUCHED.clear();
+    }
+
+    private static void closeIdleRegions() {
+        if ((frame & 255) != 0) return;
+        var iterator = REGIONS.values().iterator();
+        while (iterator.hasNext()) {
+            var region = iterator.next();
+            if (frame - region.frame < REGION_IDLE_FRAMES) continue;
+            region.close();
+            iterator.remove();
+        }
+    }
 
     private StructureFireClient() {}
 
@@ -56,6 +148,7 @@ final class StructureFireClient {
         MESHES.clear();
         ACTIVE.clear();
         VISIBLE.clear();
+        closeRegions();
         dimension = "";
         lightingPending = false;
         StructureBurnMasks.clear();
@@ -216,6 +309,9 @@ final class StructureFireClient {
 
     private static final class Corner {
         final Face face;
+        final int u, v;
+        /** This cell's slot in its region's retained meshes, as last returned by each mesh. */
+        int heatSlot = -1, emberSlot = -1;
         final Vec3 point;
         final int[] cells;
         final float textureU, textureV;
@@ -224,6 +320,8 @@ final class StructureFireClient {
 
         Corner(Face face, int u, int v) {
             this.face = face;
+            this.u = u;
+            this.v = v;
             point =
                     new SurfaceCell(face.block.pos, face.direction, 0, 0)
                             .point(u / (double) GRID, v / (double) GRID)
@@ -286,15 +384,22 @@ final class StructureFireClient {
         if (!glow) {
             frame++;
             VISIBLE.clear();
+            TOUCHED.clear();
+            boolean retained = RetainedQuads.available();
+            var frustum = event.getFrustum();
             for (var mesh : MESHES.values()) {
                 mesh.time = FireClocks.get(mc.level).time(mesh.block.pos, now);
                 if (mesh.block.quenched || mesh.time >= mesh.block.coolAt()) continue;
                 if (mesh.block.pos.distToCenterSqr(camera) > FireViewDistance.squared(mc)
-                        || !event.getFrustum().isVisible(mesh.bounds)
                         || !mc.level
                                 .getChunkSource()
                                 .hasChunk(mesh.block.pos.getX() >> 4, mesh.block.pos.getZ() >> 4)
                         || !mesh.block.matches(mc.level.getBlockState(mesh.block.pos))) continue;
+                boolean inView = frustum.isVisible(mesh.bounds);
+                // Retained regions record every in-range surface of a region that is in view.
+                var region = retained ? region(mesh.block.pos, frustum) : null;
+                boolean recorded = region != null && region.visible;
+                if (!inView && !recorded) continue;
                 mesh.light = LevelRenderer.getLightColor(mc.level, mesh.block.pos.above());
                 for (var face : mesh.faces)
                     if (face != null) {
@@ -307,7 +412,8 @@ final class StructureFireClient {
                                                         + (camera.z - mesh.block.pos.getZ() - .5)
                                                                 * face.normal.z)
                                                 > -.1;
-                        if (face.visible
+                        if (inView
+                                && face.visible
                                 && mesh.time < mesh.block.lastIgnition + mesh.block.fuel.flameTicks)
                             face.motion.updateAt(
                                     now / 20,
@@ -318,42 +424,54 @@ final class StructureFireClient {
                                     mesh.block.pos.getY() + .5 + face.normal.y * .6,
                                     mesh.block.pos.getZ() + .5 + face.normal.z * .6);
                     }
-                VISIBLE.add(mesh);
+                if (inView) VISIBLE.add(mesh);
+                if (recorded) region.meshes.add(mesh);
             }
             for (var layer : LAYERS) {
+                if (retained) {
+                    DRAWN.clear();
+                    for (var region : TOUCHED) {
+                        if (!region.visible) continue;
+                        var target = region.mesh(layer);
+                        target.begin();
+                        for (var mesh : region.meshes)
+                            surfaces(
+                                    mesh,
+                                    layer,
+                                    (a, b, c, d, alphaA, alphaB, alphaC, alphaD) -> {
+                                        boolean heat =
+                                                layer == ShaderPackRendering.GroundLayer.HEAT;
+                                        int slot =
+                                                target.quad(
+                                                        a,
+                                                        heat ? a.heatSlot : a.emberSlot,
+                                                        RetainedQuads.color(1, 1, 1, alphaA),
+                                                        RetainedQuads.color(1, 1, 1, alphaB),
+                                                        RetainedQuads.color(1, 1, 1, alphaC),
+                                                        RetainedQuads.color(1, 1, 1, alphaD));
+                                        if (heat) a.heatSlot = slot;
+                                        else a.emberSlot = slot;
+                                    });
+                        target.finish(layer.type, SURFACE);
+                        DRAWN.add(target);
+                    }
+                    RetainedQuads.draw(layer.type, DRAWN, camera);
+                    continue;
+                }
                 var vertices = buffer.getBuffer(layer.type);
                 for (var mesh : VISIBLE)
-                    for (var face : mesh.faces) {
-                        if (face == null
-                                || !face.visible
-                                || mesh.block.fuel == StructureFuel.LEAVES) continue;
-                        if (mesh.block.quenched || mesh.time >= mesh.block.coolAt()) continue;
-                        for (int v = 0; v < GRID; v++)
-                            for (int u = 0; u < GRID; u++) {
-                                var a = face.corner(u, v);
-                                var b = face.corner(u, v + 1);
-                                var c = face.corner(u + 1, v + 1);
-                                var d = face.corner(u + 1, v);
-                                float alpha =
-                                        a.alpha(layer, mesh.time)
-                                                + b.alpha(layer, mesh.time)
-                                                + c.alpha(layer, mesh.time)
-                                                + d.alpha(layer, mesh.time);
-                                if (alpha > .005f)
-                                    quad(
-                                            vertices,
-                                            face,
-                                            u,
-                                            v,
-                                            1,
-                                            layer,
-                                            mesh.time,
-                                            camera,
-                                            mesh.light);
-                            }
-                    }
+                    surfaces(
+                            mesh,
+                            layer,
+                            (a, b, c, d, alphaA, alphaB, alphaC, alphaD) -> {
+                                corner(vertices, a, alphaA, camera);
+                                corner(vertices, b, alphaB, camera);
+                                corner(vertices, c, alphaC, camera);
+                                corner(vertices, d, alphaD, camera);
+                            });
                 buffer.endBatch(layer.type);
             }
+            closeIdleRegions();
         }
         RenderType flameType =
                 reflection
@@ -426,39 +544,43 @@ final class StructureFireClient {
         }
     }
 
-    private static void quad(
-            VertexConsumer vertices,
-            Face face,
-            int u,
-            int v,
-            int size,
-            ShaderPackRendering.GroundLayer layer,
-            double now,
-            Vec3 camera,
-            int light) {
-        corner(vertices, face.corner(u, v), layer, now, camera, light);
-        corner(vertices, face.corner(u, v + size), layer, now, camera, light);
-        corner(vertices, face.corner(u + size, v + size), layer, now, camera, light);
-        corner(vertices, face.corner(u + size, v), layer, now, camera, light);
+    /** Receives each drawn surface quad with its corner alphas. */
+    private interface SurfaceSink {
+        void quad(Corner a, Corner b, Corner c, Corner d, float alphaA, float alphaB,
+                float alphaC, float alphaD);
     }
 
-    private static void corner(
-            VertexConsumer vertices,
-            Corner corner,
-            ShaderPackRendering.GroundLayer layer,
-            double now,
-            Vec3 camera,
-            int light) {
+    private static void surfaces(
+            Mesh mesh, ShaderPackRendering.GroundLayer layer, SurfaceSink sink) {
+        if (mesh.block.fuel == StructureFuel.LEAVES) return;
+        for (var face : mesh.faces) {
+            if (face == null || !face.visible) continue;
+            for (int v = 0; v < GRID; v++)
+                for (int u = 0; u < GRID; u++) {
+                    var a = face.corner(u, v);
+                    var b = face.corner(u, v + 1);
+                    var c = face.corner(u + 1, v + 1);
+                    var d = face.corner(u + 1, v);
+                    float alphaA = a.alpha(layer, mesh.time), alphaB = b.alpha(layer, mesh.time);
+                    float alphaC = c.alpha(layer, mesh.time), alphaD = d.alpha(layer, mesh.time);
+                    if (alphaA + alphaB + alphaC + alphaD <= .005f) continue;
+                    sink.quad(a, b, c, d, alphaA, alphaB, alphaC, alphaD);
+                }
+        }
+    }
+
+    private static void corner(VertexConsumer vertices, Corner corner, float alpha, Vec3 camera) {
         var p = corner.point;
         var n = corner.face.normal;
+        // Both surface layers are emissive, so they are always drawn at full brightness.
         vertices.addVertex(
                         (float) (p.x - camera.x),
                         (float) (p.y - camera.y),
                         (float) (p.z - camera.z))
-                .setColor(1f, 1f, 1f, corner.alpha(layer, now))
+                .setColor(1f, 1f, 1f, alpha)
                 .setUv(corner.textureU, corner.textureV)
                 .setOverlay(OverlayTexture.NO_OVERLAY)
-                .setLight(layer.isEmissive() ? LightTexture.FULL_BRIGHT : light)
+                .setLight(LightTexture.FULL_BRIGHT)
                 .setNormal((float) n.x, (float) n.y, (float) n.z);
     }
 

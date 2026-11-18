@@ -45,6 +45,105 @@ public final class FireClient {
             MultiBufferSource.immediate(new ByteBufferBuilder(1 << 20));
     private static String dimension = "";
     private static long serverOffset;
+    /** Ground tiles grouped into 8-block regions, each kept as retained meshes per layer. */
+    private static final it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap<GroundRegion> REGIONS =
+            new it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap<>();
+    private static final List<RetainedQuads<GroundQuad>> DRAWN_REGIONS = new ArrayList<>();
+    private static boolean retainedForShaderPack;
+    private static RetainedQuads<GroundQuad> retainedGround;
+    private static final RetainedQuads.Writer<GroundQuad> SHADER_PACK_GROUND =
+            (out, quad, ax, ay, az, colors, first) -> {
+                shaderPackCorner(out, quad.a, ax, ay, az, colors[first]);
+                shaderPackCorner(out, quad.b, ax, ay, az, colors[first + 1]);
+                shaderPackCorner(out, quad.c, ax, ay, az, colors[first + 2]);
+                shaderPackCorner(out, quad.d, ax, ay, az, colors[first + 3]);
+            };
+    private static final RetainedQuads.Writer<GroundQuad> PROCEDURAL_GROUND =
+            (out, quad, ax, ay, az, colors, first) -> {
+                proceduralCorner(out, quad.a, ax, ay, az, colors[first]);
+                proceduralCorner(out, quad.b, ax, ay, az, colors[first + 1]);
+                proceduralCorner(out, quad.c, ax, ay, az, colors[first + 2]);
+                proceduralCorner(out, quad.d, ax, ay, az, colors[first + 3]);
+            };
+
+    // Same attributes as ShaderPackRendering.groundVertex, relative to the retained anchor.
+    private static void shaderPackCorner(
+            VertexConsumer out, Corner c, double ax, double ay, double az, int color) {
+        RetainedQuads.setColor(
+                        out.addVertex((float) (c.x - ax), (float) (c.y - ay), (float) (c.z - az)),
+                        color)
+                .setUv(
+                        (float) c.x / ShaderPackRendering.TERRAIN_TEXTURE_BLOCKS,
+                        (float) c.z / ShaderPackRendering.TERRAIN_TEXTURE_BLOCKS)
+                .setOverlay(net.minecraft.client.renderer.texture.OverlayTexture.NO_OVERLAY)
+                .setLight(LightTexture.FULL_BRIGHT)
+                .setNormal(0, 1, 0);
+    }
+
+    // Same attributes as Corner.draw, relative to the retained anchor.
+    private static void proceduralCorner(
+            VertexConsumer out, Corner c, double ax, double ay, double az, int color) {
+        RetainedQuads.setColor(
+                        out.addVertex((float) (c.x - ax), (float) (c.y - ay), (float) (c.z - az)),
+                        color)
+                .setUv((float) c.x, (float) c.z);
+    }
+
+    private static final class GroundRegion {
+        final long key;
+        final List<Tile> tiles = new ArrayList<>();
+        final RetainedQuads<GroundQuad> procedural = new RetainedQuads<>();
+        final RetainedQuads<GroundQuad> heat = new RetainedQuads<>();
+        final RetainedQuads<GroundQuad> ember = new RetainedQuads<>();
+        AABB bounds;
+
+        GroundRegion(long key) {
+            this.key = key;
+        }
+
+        RetainedQuads<GroundQuad> mesh(ShaderPackRendering.GroundLayer layer) {
+            return layer == ShaderPackRendering.GroundLayer.HEAT ? heat : ember;
+        }
+
+        void add(Tile tile) {
+            tiles.add(tile);
+            var area =
+                    new AABB(
+                            tile.pos.getX(),
+                            tile.pos.getY() + 1,
+                            tile.pos.getZ(),
+                            tile.pos.getX() + 1,
+                            tile.pos.getY() + 1.02,
+                            tile.pos.getZ() + 1);
+            bounds = bounds == null ? area : bounds.minmax(area);
+        }
+
+        void close() {
+            procedural.close();
+            heat.close();
+            ember.close();
+        }
+    }
+
+    private static long regionKey(BlockPos pos) {
+        return BlockPos.asLong(pos.getX() >> 3, pos.getY() >> 3, pos.getZ() >> 3);
+    }
+
+    private static void removeTile(Tile tile) {
+        TILES.remove(tile.pos);
+        var region = REGIONS.get(regionKey(tile.pos));
+        if (region == null) return;
+        region.tiles.remove(tile);
+        if (!region.tiles.isEmpty()) return;
+        region.close();
+        REGIONS.remove(region.key);
+    }
+
+    private static void clearTiles() {
+        TILES.clear();
+        for (var region : REGIONS.values()) region.close();
+        REGIONS.clear();
+    }
 
     @EventBusSubscriber(
             modid = RealisticFirePhysics.MOD_ID,
@@ -161,7 +260,7 @@ public final class FireClient {
             SAMPLES.clear();
             MESH.clear();
             CORNERS.clear();
-            TILES.clear();
+            clearTiles();
             SMOKE_SITES.clear();
             FLAME_SITES.clear();
         }
@@ -235,7 +334,7 @@ public final class FireClient {
                 var origin = CORNERS.get(site);
                 tile.quads.removeIf(quad -> quad.a == origin);
                 tile.cells[cellIndex(site)] = null;
-                if (tile.quads.isEmpty()) TILES.remove(tile.pos);
+                if (tile.quads.isEmpty()) removeTile(tile);
             }
         for (int dx = -1; dx <= 2; dx++)
             for (int dz = -1; dz <= 2; dz++) {
@@ -312,7 +411,7 @@ public final class FireClient {
         SAMPLES.clear();
         MESH.clear();
         CORNERS.clear();
-        TILES.clear();
+        clearTiles();
         SMOKE_SITES.clear();
         FLAME_SITES.clear();
         VISIBLE_SMOKE.clear();
@@ -372,7 +471,21 @@ public final class FireClient {
         }
     }
 
-    private record GroundQuad(Corner a, Corner b, Corner c, Corner d) {}
+    private static final class GroundQuad {
+        final Corner a, b, c, d;
+        /** This quad's slot in its region's retained meshes, as last returned by each mesh. */
+        int proceduralSlot = -1, heatSlot = -1, emberSlot = -1;
+
+        GroundQuad(Corner a, Corner b, Corner c, Corner d) {
+            this.a = a;
+            this.b = b;
+            this.c = c;
+            this.d = d;
+        }
+    }
+
+    /** Per-frame sine and cosine of the ember flicker's time term. */
+    private static double flickerTime = Double.NaN, flickerSin, flickerCos;
 
     private static final class Tile {
         final BlockPos pos;
@@ -383,7 +496,7 @@ public final class FireClient {
         final GroundQuad fullQuad;
         boolean coverageChecked, fullCoverage;
         long coverageSettlesAt;
-        boolean visible;
+        boolean visible, inRange;
         double distance, time;
         final FlameMotion motion = new FlameMotion();
         final GroundPlumes plumes = new GroundPlumes();
@@ -415,6 +528,7 @@ public final class FireClient {
 
         Tile(BlockPos pos) {
             this.pos = pos;
+            REGIONS.computeIfAbsent(regionKey(pos), GroundRegion::new).add(this);
             var origin = new FireField.Site(pos.getX() * 8, pos.getY(), pos.getZ() * 8);
             fullQuad =
                     new GroundQuad(
@@ -461,8 +575,11 @@ public final class FireClient {
         final BurnCornerState burn = new BurnCornerState(values);
         long updated = -1;
         float cover, hot, ember, dry;
-        final long[] materialFrame = new long[GROUND_LAYERS.length];
-        final float[] alpha = new float[GROUND_LAYERS.length];
+        /** Fixed part of this corner's ember flicker: sin and cos of its phase. */
+        final double phaseSin, phaseCos;
+        // One cached alpha per ground layer, kept as fields so a frame's pass reads one object.
+        long charFrame, dryFrame, heatFrame, emberFrame;
+        float charAlpha, dryAlpha, heatAlpha, emberAlpha;
 
         Corner(FireField.Site site) {
             x = site.x() / 8.0;
@@ -472,6 +589,9 @@ public final class FireClient {
                     new FireField.Site[] {
                         site, site.offset(-1, 0), site.offset(0, -1), site.offset(-1, -1)
                     };
+            double phase = ShaderPackRendering.emberPhase(x, z);
+            phaseSin = Math.sin(phase);
+            phaseCos = Math.cos(phase);
             refresh();
         }
 
@@ -499,23 +619,76 @@ public final class FireClient {
         }
 
         float alpha(ShaderPackRendering.GroundLayer layer, double now) {
-            int index = layer.ordinal();
-            if (materialFrame[index] != frame) {
-                update(now);
-                alpha[index] =
-                        ShaderPackRendering.groundAlpha(
-                                layer, cover, hot, ember, dry, now / 20, x, z);
-                materialFrame[index] = frame;
+            return switch (layer) {
+                case CHAR -> {
+                    if (charFrame != frame) {
+                        charAlpha = computeAlpha(layer, now);
+                        charFrame = frame;
+                    }
+                    yield charAlpha;
+                }
+                case DRY -> {
+                    if (dryFrame != frame) {
+                        dryAlpha = computeAlpha(layer, now);
+                        dryFrame = frame;
+                    }
+                    yield dryAlpha;
+                }
+                case HEAT -> {
+                    if (heatFrame != frame) {
+                        heatAlpha = computeAlpha(layer, now);
+                        heatFrame = frame;
+                    }
+                    yield heatAlpha;
+                }
+                case EMBER -> {
+                    if (emberFrame != frame) {
+                        emberAlpha = computeAlpha(layer, now);
+                        emberFrame = frame;
+                    }
+                    yield emberAlpha;
+                }
+            };
+        }
+
+        private float computeAlpha(ShaderPackRendering.GroundLayer layer, double now) {
+            update(now);
+            if (layer != ShaderPackRendering.GroundLayer.EMBER)
+                return ShaderPackRendering.groundAlpha(layer, cover, hot, ember, dry, 0);
+            if (now != flickerTime) {
+                flickerTime = now;
+                double time = now / 20 * 2.1;
+                flickerSin = Math.sin(time);
+                flickerCos = Math.cos(time);
             }
-            return alpha[index];
+            // sin(time + phase), expanded so each corner needs no sine of its own.
+            return ShaderPackRendering.groundAlpha(
+                    layer, cover, hot, ember, dry, flickerSin * phaseCos + flickerCos * phaseSin);
         }
     }
 
-    private static void drawTexturedGround(double now) {
+    private static void drawTexturedGround(
+            double now, net.minecraft.client.renderer.culling.Frustum frustum) {
         // Ground cells have disjoint interiors and opaque terrain behind them. Their material
         // passes have a fixed order; sorting every cell cannot improve that order.
         for (var layer : GROUND_LAYERS) {
             if (!layer.isEmissive()) continue;
+            if (RetainedQuads.available()) {
+                DRAWN_REGIONS.clear();
+                for (var region : REGIONS.values()) {
+                    if (!frustum.isVisible(region.bounds)) continue;
+                    retainedGround = region.mesh(layer);
+                    retainedGround.begin();
+                    for (var tile : region.tiles)
+                        if (tile.inRange && tile.hasLayer(layer, tile.time))
+                            retainGroundLayer(tile, layer, now);
+                    retainedGround.finish(layer.type, SHADER_PACK_GROUND);
+                    DRAWN_REGIONS.add(retainedGround);
+                }
+                retainedGround = null;
+                RetainedQuads.draw(layer.type, DRAWN_REGIONS, cameraPosition);
+                continue;
+            }
             var vertices = BUFFER.getBuffer(layer.type);
             for (var tile : TILES.values()) {
                 if (!tile.visible || !tile.hasLayer(layer, tile.time)) continue;
@@ -540,6 +713,83 @@ public final class FireClient {
             }
             BUFFER.endBatch(layer.type);
         }
+    }
+
+    /**
+     * The quads {@link #drawTexturedGround} draws for a tile, passed to the retained mesh. Heat
+     * cells are passed one by one: the immediate path merges equal neighboring cells into one
+     * rectangle, which covers the same pixels with the same alpha and texture coordinates, and
+     * passes the same threshold (four equal corners).
+     */
+    private static void retainGroundLayer(
+            Tile tile, ShaderPackRendering.GroundLayer layer, double now) {
+        if (layer == ShaderPackRendering.GroundLayer.HEAT) {
+            for (var quad : tile.cells) if (quad != null) retainGroundQuad(quad, layer, now);
+            return;
+        }
+        if (layer == ShaderPackRendering.GroundLayer.EMBER
+                && tile.distance > DETAILED_EMBER_DISTANCE_SQUARED) {
+            tile.settleCoverage(now);
+            if (tile.fullCoverage) {
+                retainGroundQuad(tile.fullQuad, layer, now);
+                return;
+            }
+        }
+        for (int quadIndex = 0; quadIndex < tile.quads.size(); quadIndex++) {
+            var quad = tile.quads.get(quadIndex);
+            if (layer == ShaderPackRendering.GroundLayer.EMBER
+                    && !EmberCoverage.contains(quad.a.x, quad.a.z)) continue;
+            retainGroundQuad(quad, layer, now);
+        }
+    }
+
+    private static void retainGroundQuad(
+            GroundQuad quad, ShaderPackRendering.GroundLayer layer, double now) {
+        float a = quad.a.alpha(layer, now), b = quad.b.alpha(layer, now);
+        float c = quad.c.alpha(layer, now), d = quad.d.alpha(layer, now);
+        if (a + b + c + d < .005f) return;
+        boolean heat = layer == ShaderPackRendering.GroundLayer.HEAT;
+        int slot =
+                retainedGround.quad(
+                        quad,
+                        heat ? quad.heatSlot : quad.emberSlot,
+                        RetainedQuads.color(1, 1, 1, a),
+                        RetainedQuads.color(1, 1, 1, b),
+                        RetainedQuads.color(1, 1, 1, c),
+                        RetainedQuads.color(1, 1, 1, d));
+        if (heat) quad.heatSlot = slot;
+        else quad.emberSlot = slot;
+    }
+
+    /** Procedural ground for the built-in renderer; the shader animates embers and heat. */
+    private static void drawProceduralGround(
+            double now, net.minecraft.client.renderer.culling.Frustum frustum) {
+        DRAWN_REGIONS.clear();
+        for (var region : REGIONS.values()) {
+            if (!frustum.isVisible(region.bounds)) continue;
+            var mesh = region.procedural;
+            mesh.begin();
+            for (var tile : region.tiles) {
+                if (!tile.inRange || tile.time >= tile.effectsUntil) continue;
+                for (var q : tile.quads)
+                    q.proceduralSlot =
+                            mesh.quad(
+                                    q,
+                                    q.proceduralSlot,
+                                    proceduralColor(q.a, now),
+                                    proceduralColor(q.b, now),
+                                    proceduralColor(q.c, now),
+                                    proceduralColor(q.d, now));
+            }
+            mesh.finish(FireRenderTypes.GROUND, PROCEDURAL_GROUND);
+            DRAWN_REGIONS.add(mesh);
+        }
+        RetainedQuads.draw(FireRenderTypes.GROUND, DRAWN_REGIONS, cameraPosition);
+    }
+
+    private static int proceduralColor(Corner corner, double now) {
+        corner.update(now);
+        return RetainedQuads.color(corner.cover, corner.hot, corner.ember, corner.dry);
     }
 
     private static void drawHeat(VertexConsumer vertices, Tile tile, double now) {
@@ -685,15 +935,21 @@ public final class FireClient {
         RenderSystem.applyModelViewMatrix();
         try {
             if (!glowPass) frame++;
-            var ground = textured ? null : BUFFER.getBuffer(groundType);
+            boolean retained = RetainedQuads.available();
+            if (!glowPass) {
+                if (retainedForShaderPack != textured) RetainedQuads.invalidateAll();
+                retainedForShaderPack = textured;
+                RetainedQuads.follow(camera);
+            }
+            var ground = textured || retained ? null : BUFFER.getBuffer(groundType);
             if (!glowPass)
                 for (var tile : TILES.values()) {
                     tile.time = FireClocks.get(mc.level).time(tile.pos, now);
                     tile.distance = tile.pos.distSqr(mc.player.blockPosition());
-                    tile.visible =
+                    tile.inRange =
                             tile.distance <= FireViewDistance.squared(mc)
-                                    && e.getFrustum().isVisible(tile.bounds)
                                     && FireField.fuel(mc.level, tile.pos) > 0;
+                    tile.visible = tile.inRange && e.getFrustum().isVisible(tile.bounds);
                     if (tile.visible && tile.time < tile.flameUntil) {
                         tile.motion.update(
                                 now / 20, tile.pos.getX(), tile.pos.getY(), tile.pos.getZ());
@@ -704,7 +960,7 @@ public final class FireClient {
                                 clamp((tile.flameUntil - tile.time) / 12.0),
                                 false);
                     }
-                    if (!tile.visible || textured || tile.time >= tile.effectsUntil) continue;
+                    if (!tile.visible || ground == null || tile.time >= tile.effectsUntil) continue;
                     for (var q : tile.quads) {
                         q.a.draw(ground, now);
                         q.b.draw(ground, now);
@@ -712,7 +968,8 @@ public final class FireClient {
                         q.d.draw(ground, now);
                     }
                 }
-            if (reflectionPass) drawTexturedGround(now);
+            if (reflectionPass) drawTexturedGround(now, e.getFrustum());
+            else if (!textured && retained) drawProceduralGround(now, e.getFrustum());
             else if (!textured) BUFFER.endBatch(groundType);
             Vec3 right = new Vec3(e.getCamera().getLeftVector()).scale(-1);
             Vec3 flatRight = new Vec3(right.x, 0, right.z).normalize();

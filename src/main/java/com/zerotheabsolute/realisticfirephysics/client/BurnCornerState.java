@@ -5,9 +5,13 @@ import com.zerotheabsolute.realisticfirephysics.FirePacket;
 import com.zerotheabsolute.realisticfirephysics.FireSettings;
 import com.zerotheabsolute.realisticfirephysics.simulation.FireClocks;
 
-/** Exact linear segments keep continuous burn animation without revisiting settled samples. */
+/**
+ * Exact linear segments keep continuous burn animation without revisiting settled samples.
+ *
+ * <p>Channel offsets and slopes are plain fields: tens of thousands of corners are read every
+ * frame, so each one stays a single object instead of one object plus two small arrays.
+ */
 final class BurnCornerState {
-    private static final int COVER = 0, HEAT = 1, EMBER = 2, DRY = 3;
     private static final int SCORCH_TICKS = 8, HEAT_RISE_TICKS = 3;
     private static final int GROUND_FADE_TICKS = 12, VEGETATION_FADE_TICKS = 40;
     private static final double CORNER_WEIGHT = .25;
@@ -16,7 +20,8 @@ final class BurnCornerState {
     private static final int[] GROUND_BOUNDARIES = boundaries(1);
     private static final int[] VEGETATION_BOUNDARIES = boundaries(2);
     private final FirePacket.Sample[] samples;
-    private final double[] start = new double[4], slope = new double[4];
+    private double coverStart, heatStart, emberStart, dryStart;
+    private double coverSlope, heatSlope, emberSlope, drySlope;
     private long epoch = Long.MIN_VALUE, nextChange = Long.MIN_VALUE;
     private long clockRevision = Long.MIN_VALUE;
     private boolean constant;
@@ -54,25 +59,20 @@ final class BurnCornerState {
         if (now < epoch || now >= nextChange || revision != clockRevision) {
             prepare((long) Math.floor(now), clocks);
             clockRevision = revision;
-            constant =
-                    slope[COVER] == 0 && slope[HEAT] == 0 && slope[EMBER] == 0 && slope[DRY] == 0;
+            constant = coverSlope == 0 && heatSlope == 0 && emberSlope == 0 && drySlope == 0;
         } else if (constant) return;
         double elapsed = now - epoch;
-        cover = value(COVER, elapsed);
-        heat = value(HEAT, elapsed);
-        ember = value(EMBER, elapsed);
-        dry = value(DRY, elapsed);
-    }
-
-    private float value(int channel, double elapsed) {
-        return (float) (start[channel] + slope[channel] * elapsed);
+        cover = (float) (coverStart + coverSlope * elapsed);
+        heat = (float) (heatStart + heatSlope * elapsed);
+        ember = (float) (emberStart + emberSlope * elapsed);
+        dry = (float) (dryStart + drySlope * elapsed);
     }
 
     private void prepare(long now, FireClocks clocks) {
         epoch = now;
         nextChange = Long.MAX_VALUE;
-        java.util.Arrays.fill(start, 0);
-        java.util.Arrays.fill(slope, 0);
+        coverStart = heatStart = emberStart = dryStart = 0;
+        coverSlope = heatSlope = emberSlope = drySlope = 0;
         for (var sample : samples) {
             if (sample == null) continue;
             var clock =
@@ -97,10 +97,13 @@ final class BurnCornerState {
                     nextChange = Math.min(nextChange, now + change - local);
             }
             if (sample.fuel() == 3) {
-                ramp(DRY, age, FireSettings.TORCH_DRY_TICKS, running);
+                dryStart += clamp(age / FireSettings.TORCH_DRY_TICKS) * CORNER_WEIGHT;
+                if (running && age >= 0 && age < FireSettings.TORCH_DRY_TICKS)
+                    drySlope += CORNER_WEIGHT / FireSettings.TORCH_DRY_TICKS;
                 continue;
             }
-            ramp(COVER, age, SCORCH_TICKS, running);
+            coverStart += clamp(age / SCORCH_TICKS) * CORNER_WEIGHT;
+            if (running && age >= 0 && age < SCORCH_TICKS) coverSlope += CORNER_WEIGHT / SCORCH_TICKS;
             if (sample.quenched()) {
                 if (sample.stoppedAt() >= 0) {
                     long end = FireField.emberEnd(sample);
@@ -108,9 +111,9 @@ final class BurnCornerState {
                     if (duration > 0) {
                         double atStop = clamp((sample.ignition() + FireField.coolTime(sample.fuel())
                                 - sample.stoppedAt()) / (double) FireSettings.SMOLDER_TICKS);
-                        start[EMBER] += atStop * clamp((end - local) / duration) * CORNER_WEIGHT;
+                        emberStart += atStop * clamp((end - local) / duration) * CORNER_WEIGHT;
                         if (running && local >= sample.stoppedAt() && local < end) {
-                            slope[EMBER] -= atStop * CORNER_WEIGHT / duration;
+                            emberSlope -= atStop * CORNER_WEIGHT / duration;
                             nextChange = Math.min(nextChange, now + end - local);
                         }
                     }
@@ -119,22 +122,17 @@ final class BurnCornerState {
             }
             int lifetime = FireField.lifetime(sample.fuel());
             int fade = fadeTicks(sample.fuel());
-            start[HEAT] +=
+            heatStart +=
                     clamp(age / HEAT_RISE_TICKS) * clamp((lifetime - age) / fade) * CORNER_WEIGHT;
             if (running && age >= 0 && age < HEAT_RISE_TICKS)
-                slope[HEAT] += CORNER_WEIGHT / HEAT_RISE_TICKS;
+                heatSlope += CORNER_WEIGHT / HEAT_RISE_TICKS;
             else if (running && age >= lifetime - fade && age < lifetime)
-                slope[HEAT] -= CORNER_WEIGHT / fade;
+                heatSlope -= CORNER_WEIGHT / fade;
             double cooling = age - lifetime;
-            start[EMBER] += clamp(1 - cooling / FireSettings.SMOLDER_TICKS) * CORNER_WEIGHT;
+            emberStart += clamp(1 - cooling / FireSettings.SMOLDER_TICKS) * CORNER_WEIGHT;
             if (running && cooling >= 0 && cooling < FireSettings.SMOLDER_TICKS)
-                slope[EMBER] -= CORNER_WEIGHT / FireSettings.SMOLDER_TICKS;
+                emberSlope -= CORNER_WEIGHT / FireSettings.SMOLDER_TICKS;
         }
-    }
-
-    private void ramp(int channel, double age, int duration, boolean running) {
-        start[channel] += clamp(age / duration) * CORNER_WEIGHT;
-        if (running && age >= 0 && age < duration) slope[channel] += CORNER_WEIGHT / duration;
     }
 
     private static double clamp(double value) {

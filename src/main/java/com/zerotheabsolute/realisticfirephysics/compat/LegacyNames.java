@@ -23,6 +23,10 @@ public final class LegacyNames {
     public static final String EXTINGUISHED = "surfacefire_extinguished";
     public static final String CONFIG = "realisticfirephysics-server.toml";
 
+    // Saved-data lookups run for every fire query; resolve each name once instead of per call.
+    private static final java.util.concurrent.ConcurrentHashMap<String, String[]> SAVED_NAMES =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
     private LegacyNames() {}
 
     public static void aliases(RegisterEvent event) {
@@ -56,13 +60,16 @@ public final class LegacyNames {
     public static <T extends SavedData> T saved(
             ServerLevel level, SavedData.Factory<T> factory, String suffix) {
         var storage = level.getDataStorage();
-        String name = "rfp" + suffix;
+        String[] names =
+                SAVED_NAMES.computeIfAbsent(
+                        suffix, key -> new String[] {"rfp" + key, "surface_fire" + key});
+        String name = names[0];
         T value = storage.get(factory, name);
         if (value != null) return value;
         try {
             var tag =
                     storage.readTagFromDisk(
-                            "surface_fire" + suffix,
+                            names[1],
                             null,
                             SharedConstants.getCurrentVersion().getDataVersion().getVersion());
             value = factory.deserializer().apply(tag.getCompound("data"), level.registryAccess());

@@ -104,4 +104,36 @@ class JoinedFlamesTest {
         fire.add(0, 1.5, 0, .5, .8, new Vec3(0, 1, 0), .4f, 1, true);
         assertEquals(2, fire.mergeVertical());
     }
+
+    @Test
+    void denseBucketIndexLinksExactlyLikeTheMapLookup() {
+        var random = new java.util.Random(20261117);
+        for (int trial = 0; trial < 40; trial++) {
+            var dense = new JoinedFlames();
+            var map = new JoinedFlames();
+            map.denseIndexEnabled = false;
+            // Clustered fronts and columns around negative and positive bucket boundaries.
+            double originX = random.nextInt(9) - 4, originZ = random.nextInt(9) - 4;
+            int count = 50 + random.nextInt(400);
+            for (int i = 0; i < count; i++) {
+                double x = originX + random.nextDouble() * 6 - 3;
+                double y = 1 + random.nextInt(4) * .5 + random.nextDouble() * .4;
+                double z = originZ + random.nextDouble() * 6 - 3;
+                double width = .2 + random.nextDouble() * .4;
+                double height = .1 + random.nextDouble();
+                var up = new Vec3(random.nextDouble() * .2 - .1, 1, random.nextDouble() * .2 - .1);
+                float seed = random.nextFloat(), heat = .02f + random.nextFloat();
+                boolean vertical = random.nextInt(4) == 0;
+                dense.add(x, y, z, width, height, up, seed, heat, vertical);
+                map.add(x, y, z, width, height, up, seed, heat, vertical);
+            }
+            dense.link();
+            map.link();
+            for (int i = 0; i < count; i++) {
+                assertEquals(map.merged(i), dense.merged(i), "merged " + trial + "/" + i);
+                assertEquals(map.firstLink(i), dense.firstLink(i), "first " + trial + "/" + i);
+                assertEquals(map.secondLink(i), dense.secondLink(i), "second " + trial + "/" + i);
+            }
+        }
+    }
 }

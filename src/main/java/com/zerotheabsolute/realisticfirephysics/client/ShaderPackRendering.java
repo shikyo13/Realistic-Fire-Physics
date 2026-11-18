@@ -257,6 +257,27 @@ public final class ShaderPackRendering extends RenderStateShard {
         };
     }
 
+    /** Phase of a ground position's ember flicker; see {@link #groundAlpha}. */
+    static double emberPhase(double x, double z) {
+        return x * 13.7 + z * 23.1;
+    }
+
+    /**
+     * {@link #groundAlpha} with the ember flicker {@code sin(time * 2.1 + phase)} supplied by the
+     * caller, so a frame can evaluate it from one sine and cosine of {@code time * 2.1} and each
+     * position's fixed phase.
+     */
+    static float groundAlpha(
+            GroundLayer layer, float cover, float hot, float ember, float dry, double flicker) {
+        float coverage = smooth(.12f, .78f, cover);
+        return switch (layer) {
+            case CHAR -> coverage;
+            case DRY -> dry * (1 - coverage);
+            case HEAT -> coverage * hot * .45f;
+            case EMBER -> ember <= 0 ? 0 : coverage * ember * (.60f + .40f * (float) flicker);
+        };
+    }
+
     private static float smooth(float low, float high, float value) {
         float t = Math.clamp((value - low) / (high - low), 0, 1);
         return t * t * (3 - 2 * t);

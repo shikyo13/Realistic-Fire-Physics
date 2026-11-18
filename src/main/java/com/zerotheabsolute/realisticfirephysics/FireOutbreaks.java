@@ -33,9 +33,11 @@ public final class FireOutbreaks extends SavedData {
         }
     }
 
+    private static final Factory<FireOutbreaks> FACTORY =
+            new Factory<>(FireOutbreaks::new, FireOutbreaks::load);
+
     public static FireOutbreaks get(ServerLevel level) {
-        return LegacyNames.saved(
-                level, new Factory<>(FireOutbreaks::new, FireOutbreaks::load), "_outbreaks");
+        return LegacyNames.saved(level, FACTORY, "_outbreaks");
     }
 
     private Group root(long id) {

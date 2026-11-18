@@ -42,10 +42,12 @@ public final class FireClocks extends SavedData {
         int references, hotReferences;
     }
 
+    private static final Factory<FireClocks> FACTORY =
+            new Factory<>(FireClocks::new, FireClocks::load);
+
     public static FireClocks get(Level level) {
         if (!(level instanceof ServerLevel server)) return CLIENT;
-        return LegacyNames.saved(
-                server, new Factory<>(FireClocks::new, FireClocks::load), "_clocks");
+        return LegacyNames.saved(server, FACTORY, "_clocks");
     }
 
     public static boolean ticking(ServerLevel level, long chunk) {

@@ -32,6 +32,19 @@ final class JoinedFlames {
     private final Node bridge = new Node();
     private final ArrayList<IntArrayList> buckets = new ArrayList<>();
     private final Long2ObjectOpenHashMap<IntArrayList> grid = new Long2ObjectOpenHashMap<>();
+    // Bucket coordinates in creation order (x, y, z per bucket), used to build the dense index.
+    private final IntArrayList bucketCoordinates = new IntArrayList();
+    /**
+     * Linking probes up to 27 neighboring buckets for every plume, every frame. When this frame's
+     * buckets fit in a bounded box, those probes read a flat array instead of hashing; otherwise
+     * they fall back to the map. Both return the same bucket lists in the same order.
+     */
+    private static final int MAX_DENSE_BUCKETS = 1 << 18;
+    private IntArrayList[] dense = new IntArrayList[0];
+    private int denseMinX, denseMinY, denseMinZ, denseSizeX, denseSizeY, denseSizeZ;
+    private boolean denseActive;
+    /** Tests disable the dense index to compare it with the map-only lookup. */
+    boolean denseIndexEnabled = true;
     private int size, usedBuckets;
     private boolean linked;
     private final BufferedMesh frameMesh = new BufferedMesh(1 << 20);
@@ -47,7 +60,9 @@ final class JoinedFlames {
     void clear() {
         size = usedBuckets = 0;
         linked = false;
+        denseActive = false;
         grid.clear();
+        bucketCoordinates.clear();
     }
 
     void add(
@@ -74,6 +89,7 @@ final class JoinedFlames {
             boolean vertical) {
         if (heat <= .01 || height < .025) return;
         linked = false;
+        denseActive = false;
         Node node;
         if (size == nodes.size()) {
             node = new Node();
@@ -92,27 +108,73 @@ final class JoinedFlames {
         node.seed = seed;
         node.heat = node.sourceHeat = heat;
         node.first = node.second = -1;
-        long key = key(x, y, z);
+        int bx = (int) Math.floor(x / BUCKET);
+        int by = (int) Math.floor(y / BUCKET);
+        int bz = (int) Math.floor(z / BUCKET);
+        long key = BlockPos.asLong(bx, by, bz);
         var list = grid.get(key);
         if (list == null) {
             if (usedBuckets == buckets.size()) buckets.add(new IntArrayList());
             list = buckets.get(usedBuckets++);
             list.clear();
             grid.put(key, list);
+            bucketCoordinates.add(bx);
+            bucketCoordinates.add(by);
+            bucketCoordinates.add(bz);
         }
         list.add(size++);
     }
 
-    private static long key(double x, double y, double z) {
-        return BlockPos.asLong(
-                (int) Math.floor(x / BUCKET),
-                (int) Math.floor(y / BUCKET),
-                (int) Math.floor(z / BUCKET));
+    private void indexBuckets() {
+        denseActive = false;
+        if (usedBuckets == 0 || !denseIndexEnabled) return;
+        int minX = Integer.MAX_VALUE, minY = Integer.MAX_VALUE, minZ = Integer.MAX_VALUE;
+        int maxX = Integer.MIN_VALUE, maxY = Integer.MIN_VALUE, maxZ = Integer.MIN_VALUE;
+        for (int i = 0; i < usedBuckets; i++) {
+            int x = bucketCoordinates.getInt(3 * i);
+            int y = bucketCoordinates.getInt(3 * i + 1);
+            int z = bucketCoordinates.getInt(3 * i + 2);
+            minX = Math.min(minX, x);
+            maxX = Math.max(maxX, x);
+            minY = Math.min(minY, y);
+            maxY = Math.max(maxY, y);
+            minZ = Math.min(minZ, z);
+            maxZ = Math.max(maxZ, z);
+        }
+        long sizeX = (long) maxX - minX + 1, sizeY = (long) maxY - minY + 1;
+        long sizeZ = (long) maxZ - minZ + 1, volume = sizeX * sizeY * sizeZ;
+        if (volume > MAX_DENSE_BUCKETS) return;
+        if (dense.length < volume) dense = new IntArrayList[(int) volume];
+        else java.util.Arrays.fill(dense, 0, (int) volume, null);
+        denseMinX = minX;
+        denseMinY = minY;
+        denseMinZ = minZ;
+        denseSizeX = (int) sizeX;
+        denseSizeY = (int) sizeY;
+        denseSizeZ = (int) sizeZ;
+        for (int i = 0; i < usedBuckets; i++) {
+            int x = bucketCoordinates.getInt(3 * i) - minX;
+            int y = bucketCoordinates.getInt(3 * i + 1) - minY;
+            int z = bucketCoordinates.getInt(3 * i + 2) - minZ;
+            dense[(x * denseSizeY + y) * denseSizeZ + z] = buckets.get(i);
+        }
+        denseActive = true;
+    }
+
+    private IntArrayList bucket(int x, int y, int z) {
+        if (!denseActive) return grid.get(BlockPos.asLong(x, y, z));
+        x -= denseMinX;
+        y -= denseMinY;
+        z -= denseMinZ;
+        if (x < 0 || y < 0 || z < 0 || x >= denseSizeX || y >= denseSizeY || z >= denseSizeZ)
+            return null;
+        return dense[(x * denseSizeY + y) * denseSizeZ + z];
     }
 
     void link() {
         if (linked) return;
         linked = true;
+        indexBuckets();
         mergeVertical();
         for (int i = 0; i < size; i++) {
             var a = nodes.get(i);
@@ -164,7 +226,7 @@ final class JoinedFlames {
         for (int y = minY; y <= maxY; y++)
             for (int x = minX; x <= maxX; x++)
                 for (int z = minZ; z <= maxZ; z++) {
-                    var bucket = grid.get(BlockPos.asLong(x, y, z));
+                    var bucket = bucket(x, y, z);
                     if (bucket == null) continue;
                     for (int i = 0; i < bucket.size(); i++) {
                         int index = bucket.getInt(i);
@@ -181,6 +243,18 @@ final class JoinedFlames {
                     }
                 }
         return result;
+    }
+
+    int firstLink(int index) {
+        return nodes.get(index).first;
+    }
+
+    int secondLink(int index) {
+        return nodes.get(index).second;
+    }
+
+    boolean merged(int index) {
+        return nodes.get(index).merged;
     }
 
     boolean connected(int a, int b) {
@@ -201,7 +275,7 @@ final class JoinedFlames {
         for (int dy = minY; dy <= maxY; dy++)
             for (int dx = minX; dx <= maxX; dx++)
                 for (int dz = minZ; dz <= maxZ; dz++) {
-                    var bucket = grid.get(BlockPos.asLong(dx, dy, dz));
+                    var bucket = bucket(dx, dy, dz);
                     if (bucket == null) continue;
                     for (int k = 0; k < bucket.size(); k++) {
                         int j = bucket.getInt(k);
@@ -229,6 +303,10 @@ final class JoinedFlames {
         nodes.trimToSize();
         buckets.clear();
         buckets.trimToSize();
+        bucketCoordinates.clear();
+        bucketCoordinates.trim();
+        dense = new IntArrayList[0];
+        denseActive = false;
         verticalOrder.clear();
         verticalOrder.trim();
         grid.trim();

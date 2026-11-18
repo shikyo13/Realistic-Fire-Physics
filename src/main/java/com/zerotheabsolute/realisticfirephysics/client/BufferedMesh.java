@@ -36,7 +36,7 @@ final class BufferedMesh implements AutoCloseable {
             if (type.sortOnUpload()) {
                 FlameSortScratch.begin();
                 try {
-                    mesh.sortQuads(storage, RenderSystem.getVertexSorting());
+                    mesh.sortQuads(storage, FlameQuadOrder.replacing(RenderSystem.getVertexSorting()));
                 } finally {
                     FlameSortScratch.end();
                 }

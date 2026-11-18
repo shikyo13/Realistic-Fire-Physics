@@ -60,10 +60,11 @@ public final class FireField extends SavedData {
     private boolean recovered, archivedLegacy;
     private long ignitions, extinguished;
 
+    private static final SavedData.Factory<FireField> FACTORY =
+            new SavedData.Factory<>(FireField::new, FireField::load);
+
     public static FireField get(ServerLevel level) {
-        var field =
-                LegacyNames.saved(
-                        level, new SavedData.Factory<>(FireField::new, FireField::load), "");
+        var field = LegacyNames.saved(level, FACTORY, "");
         if (field.clocks == null) {
             field.world = level;
             field.clocks = FireClocks.get(level);
