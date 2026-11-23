@@ -53,7 +53,7 @@ Independent ignitions receive separate spread allowances. Connected fronts share
 
 Age and capacity cleanup are disabled by default. Enabling them removes eligible cold burn marks as chunks are visited, allowing remaining fuel there to burn again. Rain recovery gradually restores the ground surface; it does not rebuild consumed trees or structures. Replacing burned terrain removes its old scars. Cooled scars are stored with their chunks and are separate from active combustion, lighting and damage. Existing worlds and configuration files migrate automatically.
 
-Local rendering settings are in `config/realisticfirephysics-client.toml`. `heatHaze` enables heat distortion, and `heatHazeStrength` adjusts its intensity from `0` to `2` (default `1`).
+Local rendering settings are in `config/realisticfirephysics-client.toml`. `heatHaze` enables heat distortion, and `heatHazeStrength` adjusts its intensity from `0` to `2` (default `1`). `retainedFireGeometry` keeps burning ground and block surfaces on the GPU between frames (default `true`); disable it only if another rendering mod shows missing or frozen fire glow.
 
 `grassGrowthStyle` changes the appearance of recovering grass without changing its recovery rate. `SCATTERED` restores individual texture pixels, `PATCHES` joins them into small clusters, and `TEXTURE` grows connected paths from small starting patches. `TUFTS` builds small groups along details in the grass texture; `RUNNERS` extends narrow, branching growth between them. Each style preserves the block's original texture and biome color over the scorched soil.
 
@@ -70,3 +70,7 @@ The full `/realisticfirephysics` command and the previous `/surfacefire` spellin
 ## Build
 
 Run `./gradlew build` with Java 21. The distributable JAR is written to `build/libs/`.
+
+## License
+
+Realistic Fire Physics License 1.0. Modpacks and unmodified official releases may be redistributed without asking; see [LICENSE](LICENSE) for the full terms.
